@@ -1,0 +1,181 @@
+# This is my personal wetter.cgi.conf file
+# You will need to modify it in order to get it working. 
+# Pay attention to the database credentials as well as paths
+# which contain my name "krienke". They won't work for you! Modify them
+# according to your setup and your needs.
+# Another thing you have to watch out for are sensor definitions. Delete
+# all definitions below for sensors you do not have. If you do not own
+# eg a wind sensor delete all definitions below that describe a wind
+# sensor else you will only see an error running the wetter.cgi script.
+#
+# You should copy the modified config file in the same directory where
+# the wetter.cgi script resides.
+#
+# R. Krienke
+
+$driver="mysql"; $sysDbName="mysql";
+$dbServer="sqlhost.uni-koblenz.de"; # <------ MYSQL servername
+$dbUser="user";           # <---------------- MYSQL user
+$dbPassword="dbpassword"; # <-----------------MYSQL Password
+$database="wetter";
+$defaultPort="3306";
+
+$latestWindSpeedType=0;
+# If you assign a URL to this variable the target (should be a .css text
+# file)
+# is used to get all the css definitions instead of the internal
+# definitions
+# made below (search for variable $docCss). If you leave $externalCssUrl
+# empty the internal definitions are used.
+$externalCssUrl="http://localhost/mypath/wetter.css";     
+# If you place the css file (here: wetter.css) in the same directory
+# like 
+# the wetter script you can also simply write without http://...
+$externalCssUrl="wetter.css"; 
+# The setting below disables external css usage instead the internal
+# default css settings will be used
+$externalCssUrl="";     
+
+# Enable Windrose icons in latest display for wind sensor
+# The icons need to be present in the icons subdirectory in the place
+# where wetter.cgi
+# is located. If set to 0 no windrose symbols will be shown
+# The icons should be named like the wind directions (eg n.png, s.png
+# ssw.png). 
+# The size should be not more than 50x50 pixel. All names are: 
+# nno.png  no.png  nw.png   o.png    so.png  sso.png  sw.png   w.png
+# nnw.png  n.png   ono.png  oso.png  s.png   ssw.png  wnw.png  wsw.png
+$latestWindRose=0;
+$latestWindRoseUrl="$baseUrl/icons";
+
+
+$timeIsGMT=0;           # This variable controls if the script time
+                        # input as well as output is in
+                        # GMT or in Local time. Internally every date
+                        # and
+                        # time value is in GMT. User input is converted
+                        # to GMT if needed.
+
+$initialDisplayDays=7;    # range ofdays to be initially displayed
+$firstDate="2003-02-20"; # Approximate date of first database entry; yy-mm-dd
+($firstYear, $firstMon, $firstDay)=split(/-/, $firstDate);
+
+
+$tmpName="$$";
+$basePath="/home/krienke/www/wetter";
+$imgPath="$basePath/images";
+$baseUrl="http://userpages.uni-koblenz.de/~krienke/wetter"
+$baseImgUrl="$baseUrl/images";
+
+$latestSens="PR,WI,RA,TH";
+$latest_th=[17,1];              # Latest Data temp/hum sensors
+
+# Some options that can be used to display data that is calculated from the
+# original data values. The value on the right side is a list of logical names
+# that can be calculated like WindChill and Dewpoint.
+# The key of $latest_do (in {}) is the sensor id for which the given logical names
+# are valid. For the windchill we need the sensor id of the temperature to be used.
+# So the windchill is calculated based on the temp of the first sensor.
+# The default here is 1  which is the first tempsensor. {"30"} is the
+# default configid of the first windsensor.
+undef %latest_do;
+$latest_do->{"wind"}->{"1"}="WindChill(1)";
+$latest_do->{"th"}->{"1"}="DewPoint,absHum";
+$latest_do->{"th"}->{"17"}="DewPoint,absHum";
+
+# For rain and pressure sensors you can activate the trendData display. Doing this
+# shows at *most* 3 older values from these sensors (as well as the current value anyway) 
+# in the latest display. Note: Only *3* values are allowed since there is no more room for more
+# values. You have to specify the number of hours for each of the three values of each sensor.
+# If you e.g. say: 1h,6h,12h this means that for this sensor the value one/six/12 hour(s) ago will be
+# displayed. Please keep the format: eg "6h" not "6" nor "360Minutes"!!! If you do not want these
+# values to be displayed say eg: $latest_trendRain=[ ]; 
+$latest_trendRain=[ "1h", "12h", "24h" ];
+$latest_trendPressure=[ "3h", "6h", "12h" ];
+#
+# Watch out this is for a trend sign (up or downarrow) for temperature
+# sensors. The left value is the sensorid, the right value the time in *MINUTES*
+# to look back in order to compare this value with the current one. 
+# So "17:10" means that for temp sensor with id 17 we look for a value that
+# is 10 minutes old. For each sensor only one value is allowed here.
+# In the moment you cannot display a trend sign for humidity, only for temperature
+# Be sure to choose a time that is long enough. If eg your station collects data at an 
+# interval of 15 minutes it does make no sense to use 10 minutes below.
+$latest_trendTemp=[ "17:15", "1:15", "2:15", "3:15", "4:15", "5:15", "6:15", "7:15", "8:15" ];
+
+# The threshold values for sensors which show trends by an arrow sign. If the difference
+# of the current value of such a sensor and an older value is larger than the first value
+# given below an arrow (up or down) will be displayed.
+# The values given below define ranges for the value difference. For example the
+# values 0.1, 0.2, 0.4 define three ranges:  0.1->0.2[, 0.2->0.4[, 0.4 ->....
+# Differencevalues smaller than the first value (here:0.1) will not be decorated
+# with a trend sign. Depending on which range the current difference fits, a different
+# symbol for "small change", "more change" and "big change" will be displayed.
+# Exactly three  values a,b,c (defining three) ranges are allowed.
+$latest_trendThresholdT=["0.2", "0.4", "0.6"];  # Temp
+$latest_trendThresholdH=["1", "2", "3"];        # Humidity
+$latest_trendThresholdPres=["1", "2", "3"];     # Pressure
+
+
+# This variable controls whether in the latest data output a sensors errors
+# will be displayed. If its !=0 then if a sensor had more dropouts in the last
+# hours (given by $latestAlertHours) the sensors name will be printed in 
+# the color $latestAlertColor, to show the user that this sensor had 
+# to much errors (==drop outs) in this period of time. 
+# The numbers of errors is taken from the error table in the database.
+# So, for example
+# you could say, that if any of sensors displayed in the latest data section
+# had more than 10 errors in the last 12 hours then display its name in red:
+#
+$latestAlertErrCount=30;
+$latestAlertHours=8;     # 
+$latestAlertColor="red";  # Value has to be html conform
+
+
+
+$sensorData=sensDisplayData->new($imgPath, $baseImgUrl, $tmpName);
+$tmp=$sensorData->addSensor( {"sensType"=>"TH", "sensIds"=>[1],
+			 "grfxName"=>"Temperatur/Feuchte Außen"},
+                         {"dewPoint"=>"1"} );
+$sensorData->setVirtSensAttrib($tmp, "dewPoint", "doPrintMma", 2);
+
+$tmp=$sensorData->addSensor( {"sensType"=>"TH", "sensIds"=>[1],
+			 "omit"=>["H"], "mmaOmit"=>["H"],
+			 "statistics" => "0",
+			 "grfxName"=>"Temp/Windchill/Feuchte Außen"},
+                         {"windChill"  =>"1",
+                         "absHumidity"=>"1",
+                           });
+$sensorData->setVirtSensAttrib($tmp, "absHumidity", "doPrintMma", 2);
+#
+# Display virt mma values in both sensor overview and detailed view of 
+# one sensor.
+$sensorData->setVirtSensAttrib($tmp, "windChill", "doPrintMma", 2);
+			 
+$sensorData->addSensor( {"sensType"=>"PR"}, {} );
+$sensorData->addSensor( {"sensType"=>"WI"}, {} );
+$sensorData->addSensor( {"sensType"=>"WD"}, {} );
+$sensorData->addSensor( {"sensType"=>"WA"}, {} );
+$sensorData->addSensor( {"sensType"=>"RA"}, {} );
+$sensorData->addSensor( {"sensType"=>"TH", "sensIds"=>[17],
+                         "statistics"=> "0",
+                         "grfxName"=>"Temperatur/Feuchte Innen"},
+			                         {"absHumidity"=>"1"});
+
+
+#$sensorData->addSensor( {"sensType"=>"LI"}, {} );
+
+
+#$position="Standort: Koblenz Lay, 125m &uuml;ber NN <br> Neue Daten erst wieder ab dem 14.06.2007 ...";
+$position="Standort: Koblenz Lay, 125m &uuml;ber NN";
+$pageTitle="Wetterdaten aus Koblenz.";
+$pageAuthors="krienke@uni-koblenz.de,tdressler@tdressler.net";
+$contact='Kontakt: Rainer Krienke <A href="mailto:krienke@uni-koblenz.de">krienke@uni-koblenz.de</A> . Meine Webseiten an der <A href="http://www.uni-koblenz.de/~krienke">Uni Koblenz</A> oder <A href="http://www.krienke.org">privat</A>.';
+$pageDescription="linux ws2500 based weather data display";
+$pageMetaKeywords="wetter, Koblenz";
+$pageBackgroundPicture="sky.jpg";
+$pageBackgroundColor="#F0F8FF";
+$pageTextColor="#000000";
+$pageLinkColor="red";
+$pageVisitedLinkColor="blue";
+

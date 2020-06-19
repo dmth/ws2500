@@ -1,0 +1,189 @@
+=========================================================
+Datenformat fuer die von ws2500tomysql zu verarbeitenden Daten 
+(Ausgabeformat von ws2500 -t).
+=========================================================
+
+
+Das Format ist eine Textdatei mit festem Aufbau. Zeilen mit # am Anfang
+sind spezielle Kommentare, die das Format der nach diesen Zeilen
+folgenden Daten festlegen. Diese Header-Zeilen müssen mindestens einmal
+in der Datei, vor dem ertsen Datensatz stehen. Man kann 
+die Kommentare einfach so wie sie unten im Beispiel zu sehen sind 
+übernehmen. Wichtig ist das am Anfang eines Headers eine Zeile "#
+Sensorname..."  steht. Unter einen solchen "Header" stehen dann die
+Daten für die einzelnen Sensoren in Datenblöcken. Ein Datenblock wird
+durch eine Reihe von "---------" vom folgenden Datenblock begrenzt. Alle
+Sensordaten eines Blocks haben (zwangsweise) das gleiche Datum. Der
+Aufbau ist also:
+
+# Sensorname[-number] ...
+## Header mit Beschreibung der Datenwerte
+## ...
+#
+<Datenblock>
+--------------------------
+
+Ein Datenblock ist wiederum wie folgt aufgebaut:
+
+Blocknummer
+Datum
+<Daten eines Sensors>
+<Daten eines Sensors>
+...
+
+Für jeden Sensor wird eine Zeile verwendet. Jede Zeile hat wiederum
+folgenden Aufbau:
+
+<Sensorkürzel> (Drop outs): Sensordaten wie im Header vorgegeben, New-Flag
+
+Der Wert Dopr-Outs gibt die Summe der Sensorausfälle für diesen Sensor
+an. Sensorausfälle sind idR begründet durch Funkübertragungsstörungen.
+Der letzte Datenwert eines jeden Sensors is das New-Flag, das angibt, ob
+es sich bei dem vorliegenden Datensatz um einen im letzten
+Ausleseintervall neu ermittelten Wert handelt  (-> 1) oder ob es eine
+Funkübertragungsstörung vom Sensor zur Wetterstation gab, so daß die
+Wetterstation keinen neuen Wert dieses Sensors empfangen konnte und
+somit den zuletzt empfangenen Wert nocheinmal liefert (-> 0). 
+
+Das Sensorkürzel bezeichnet den Sensortyp:
+
+THS-x: Ein Temp/Humidity (Temperatur/Feuchte)-Sensor mit der Nummer x. Der
+       erste Sensor hat die Nummer 0. Die Nummer 17 ist reserviert für
+       die T/H-Daten des Innensensors der ws2500 (kombinierter T/H und
+       Druck Sensor). Maximal könnten also 0..16 TH-Sensoren erfasst
+       werden + dem Temperaturanteil des Innensensors.
+IS:    Innensensor zur Messung des Luftdrucks
+RS:    Regensensor
+WS:    Sensor für die Messung der Windstärke und Richtung  
+LI:    Lichtsensor     
+
+
+Ein Datenblock enthält zunächst eine Blocknummer, die einfach nur eine
+aufsteigende Zahl sein muß und nicht weiter verwendet wird. Dann folgt
+das Datum von wann die ausgelesenen Datem stammen sowohl in textueller
+Form wie vom Linux-Kommando "date" ausgegeben als auch nocheinmal
+umgerechnet in Sekunden seit 1970. Das Datum muß in GMT-Zeit (UTC) 
+vorliegen.
+
+Darunter folgen die Sensoren. THS-x Sensoren sind die Temp/Humidity
+Sensoren Nummer x. Die ws2500 gestattet bis zu 8 TH-Sesnsoren + 1 
+Innensensor.  THS-17 ist der Temperaturfühler des Innensensors der
+ws2500, der aber ansonsten keine Sonderbehandlung genießt. Der bei der
+ws2500 im Innensensor ebenfalls verbaute Luftdruckmesser wird als IS
+(Inside Sensor) angegeben. Die in Klammern hinter dem Sensorkürzel
+stehende Zahl ist die Zahl der Sensor-Dropouts
+(Funkübertragungsstörungen, die zu einem Fehlen eines Meßwerts geführt
+haben) für diesen Sensor, wie sie von der Station gemeldet wird (im
+Idealfall "0") . Die Zahl landet in der Datenbank und wird in wetter.cgi
+dazu verwendet festzustellen ob ein Sesnor zu viele Ausfälle hat. Der
+betreffende Sensor wird dann rot dargestellt.
+
+Beschreibung der Sensordatenzeilen:
+
+THS-x:
+------
+Für einen Temperatur Feuchtesensor wird zunächst die Temperatur dann der
+Feuchtewert und zuletzt das New-Flag dieses Sensors angegeben.
+
+IS:
+---
+Mit dem Innensensor wird der Luftdruck gemessen. Die Daten bestehen aus
+dem aktuellem !relativen! Luftdruck sowie dem New-Flag.
+
+RS:
+---
+Der Regensensor ist etwas aufwendiger, weil er zum einen nur einen
+Zählerstand für die Regenwippe ausgibt, wobei je Wippenschlag eine genau
+definierte Menge an Regen gefallen ist und dieser Zähler zudem 
+überlaufen kann (begrenzte Bitzahl). Die Regenmenge kann nur aus
+dem im Datensatz enthaltenen Zählerstand und dem davor ermittelten
+Zählerstand ermittelt werden kann: (currentCnt-lastCnt)*"Menge je Wippenschlag"
+
+An Daten muß folgendes angegeben werden:
+
+Wippenzähler| Regenmenge je     | absolute Regenmenge | Tol-Wert | New-Flag
+            | Wippenschlag*1000 |
+
+Anstelle der hier zur Übersicht verwendeten Trennzeichen | muß in der
+Sensordatenzeile ein Komma verwendet werden. Der Wippenzählerstand ist
+ein von der Wetterstation gelieferter Zähler für die Wippenschläge der
+nur dann auf 0 gesetzt wird, wenn der Zähler (10bit) überläuft.  
+
+Die Regenmenge pro Wippenschlag wird in mm*1000 (0.340mm Regen -> Angabe
+von 340) angegeben. Die absolute Regenmenge im letzten Zeitintervall
+wird ebenfalls im mm*1000 angegeben.  Der dahinter stehende Tol-Wert,
+ist ein vom Benutzer angegebener Toleranzwert in Wippenschlägen, der für
+die Erkennung von Funkübertragungsfehlern verwendet werden kann. Wenn
+die Differenz von aktuellem Wippenzähler - letztem Wippenzähler (aus der
+Datenbank) > als der Tol-Wert ist, dann wird der Regenwert verworfen und
+eine 0 als Regenmenge in der DB eingetragen (das alles macht
+ws2500tomysql). Für den Tol-Wert darf 0 angegeben werden, dann entfällt
+der beschriebene Toleranz-Check.  
+
+Für die Regenmenge in mm*1000 darf -1 angegeben werden. In dem Fall wird
+die Regenmenge aus dem ("aktuellen Zählerstand aus dem Datensatz" -
+dem "letzten Zählerstand aus der Datenbank") * der "Angabe für mm Regen je
+Wippenschlag" berechnet. Wird für die Regenmenge jedoch ein Wert
+verschieden von -1 angegeben, wird dieser zur Plausibilitätskontrolle
+mit dem über die Zähler berechneten verglichen. 
+
+Letztlich darf für den Regensensor also für die absolute Regenmenge eine
+-1 und für den Tol-Wert eine 0 angegeben werden. Der aktuelle
+Zählerstand der Wippe sowie die Regenmenge je Wippenschlag sind aber
+eine Pflichtangabe, um daraus die Regenmenge berechnen zu können.
+
+Das letzte Element der Zeile ist das New-Flag.
+
+WS:
+---
+Der Windsensor stell Daten zur Windgeschwindigkeit und Richtung bereit.
+Angegeben muß zuerst die Windgeschwindigkeit in km/h, dann die
+Windrichtung in Grad und ein Varianzwert für die Windrichtung ebenfalls
+in Grad. Als letztes Element folgt das New-Flag.
+
+LI:
+---
+Der Lichtsensor mißt die Lichtintensität. Angegeben wird der Lichtwert
+in Lux, der Faktor mit dem der Lux-Wert multipliziert werden muß um die
+tatsächliche Lux-Zahl zu erhalten, ein Sonnenscheinflag, 
+die Sonnenscheindauer und das New-Flag. Die Sonnenscheindauer wird von
+ws2500 auch in Minuten im aktuellen messintervall ausgegeben und
+zusaetzlich als ansteigender Wert seitdem die Station aktiv ist.
+Verwertet wird lediglich der "Sonnenschein je Messintervall".
+
+
+Beispieldatei:
+--------------
+
+Hier eine Datei, die als Input für ws2500tomysql dient, die zwei
+Datenblöcke enthält. Eine Datei darf beliebig viele Datenblöcke
+enthalten der Header (#) darf auch mehrmalig in der Datei zwischen
+Datenblöcken stehen muß aber auf jeden Fall vor dem ersten Datenblock
+stehen: 
+
+# Sensorname[-number] (drop outs): values of sensor
+## Blocknumber: Block(1)
+## Date: Cal(date), time(sec)
+## THS(Temp/humidity): Temperatur(°C), Humidity(%), New(1)
+## IS(Inside): Pressure-relativ(hPa), New
+## RS(Rain): Counter(1), OneCount(mm/1000), Rain(mm/1000), Tol(1), New(1) 
+## WS(Wind): Speed(Km/h), Direction(°), Variance(°), New(1)
+## LS(Light): Light(lux), Factor(1), Flag(1), Duration(h), New(1)
+## PS(Pyranometer): Energy(W/m), Factor(1)
+#
+Blocknumber: 457
+Date: Tue Jan 31 22:15:23 2006, 1138745723
+THS-1 (0): -4.0, 78, 1 
+THS-17 (0): 19.7, 35, 1 
+IS     (0): 1024, 1 
+RS    (0): 2007, 340, 0, 35, 1 
+WS    (0): 5.0, 40, 0.0, 1 
+----------------------------------------------------------------------
+Blocknumber: 458
+Date: Tue Jan 31 22:25:23 2006, 1138746323
+THS-1 (0): -4.0, 79, 1 
+THS-17 (0): 19.6, 35, 1 
+IS     (0): 1024, 1 
+RS    (0): 2007, 340, 0, 35, 1 
+WS    (0): 3.5, 40, 0.0, 1 
+----------------------------------------------------------------------

@@ -1,0 +1,221 @@
+#!/usr/bin/perl
+
+#
+# Script to generate the data file needed by the AWEKAS project.
+# See: http://wetter.kremstalnet.at/awekas/index.htm
+# It needs the ws2500 MYSQL database and will create output in
+# *WSWIN texfile format* that is suitable for awekas
+#
+#
+# Version & Author:
+#------------------
+# R. Krienke, 10/2005
+# krienke@uni-koblenz.de
+# $version='$Revision: 1.2 $';
+
+require DBI;
+use Getopt::Std;
+
+
+$confFile="ws2500tomysql.conf"; 
+$driver="mysql";
+$sysDbName="mysql";
+$dbadmin="root";
+$dbServer="sqlhost";
+$database="wetter";
+$dbUser="user";
+$dbPassword="password";
+$defaultPort="3306";
+$debug=0;       # Global debug flag
+$|=10;          # Flush output on stdout after <n> chars
+$wetterdbbackup="wetterdbbackup.sql";
+
+# Tables to be processed
+@tables=("th_sensors", "rain", "wind", "light", "pressure");
+#@tables=("th_sensors");
+
+# --- End of configuration section # ----------------------------------------
+
+
+#
+# Connect to database
+#
+sub connectDb{
+   my($dsn, $dbh);
+
+   # Connect to database
+   #
+   $dsn = "DBI:$driver:database=$database;host=$dbServer;port=$defaultPort";
+   if( ! ($dbh = DBI->connect($dsn, $dbUser, $dbPassword,
+        {'RaiseError' => 1, 'AutoCommit' => 0, 'PrintError' => 1, 'mysql_ssl' => 1 })) ) {
+       $errMsg="Cannot Connect to \"$dsn\" as $dbUser\n";
+       return(0);
+   }
+   return($dbh);
+}
+
+
+#
+# Close connection to database
+#
+sub closeDb{
+  my($dbh)=@_;
+
+  $dbh->disconnect();
+}
+
+
+#
+# Run a sql statement and check result
+#
+sub runSqlCommand{
+   my($dbh, $sql)=@_;
+   my($refResult);
+   
+   $refResult=$dbh->selectall_arrayref($sql);
+   
+   warn "+++ No results running sql query: \"$sql\" \n" if( !defined($refResult) );
+   
+   return($refResult);
+}
+
+
+#
+# delete rows in table that are double defined
+#
+sub deleteRows{
+   my($dbh, $table, $refRows, $count)=@_;
+   my($i);
+   my($datetime, $id, $sensid, $stationid, $sql, $status, $ret);
+   
+   print "Deleting $count rows from $table ...\n";
+
+   $status=0;
+   foreach $i (@$refRows){
+   	$datetime=$i->[0];
+   	$id=      $i->[1];
+   	$sensid=  $i->[2];
+   	$stationid=$i->[3];
+	
+	$sql="DELETE FROM $table WHERE datetime=\'$datetime\' AND " .
+	     "id=$id AND sensid=$sensid AND stationid=$stationid";
+	
+	$ret=$dbh->do( $sql );
+	#print $sql, "\n";
+	$status=1 if( $ret<=0 );    
+   }
+   
+   # commit changes
+   if( $status == 0 ){
+   	$dbh->commit;
+   }else{
+  	$dbh->rollback;
+	warn "Error in selecting rows to be deleted. Abort. No changes in $table \n";
+   }
+}
+
+#
+# Print out short help
+#
+sub usage{
+        die "$0 -h|-d\n",
+        "   -v: Print first of each identical rows.\n",
+        "   -d: Really delete double defined rows in all tables.\n",
+	"   -n: Do not ask questions eg. to create a backup. \n",
+	"   -h: Print this help\n\n";
+}
+
+
+# ------ main -----------------------------------
+#
+
+#
+# Get Options
+#
+if( ! getopts( 'dhvn') ){
+        &usage;;
+}
+&usage if( defined($opt_h) );
+
+
+
+# Try to open config file and read variables inside it
+$home=$ENV{"HOME"};
+$configFile="";
+if( -r "$home/.$confFile" ){
+        $configFile="$home/.$confFile";
+}elsif( -r "/etc/ws2500/$confFile" ){
+        $configFile="/etc/ws2500/$confFile";
+}
+if( length($configFile) ){
+   $cmd="";
+   open( FD, "$configFile" )|| warn "Cannot read $configFile. Ignored\n";
+
+   while( <FD> ){
+        $cmd.=$_;
+        if( length($cmd) > 100000 ){
+           $cmd="";
+           die "Too many commands in config file (>100000bytes. Aborting.\n";
+        }
+   }
+   eval $cmd;
+   $cmd="";
+   close(FD);
+}
+
+# Open DB
+$dbh=connectDb();
+
+if( !defined($opt_n) && $opt_d ){
+    print "Do you want to backup yout wetter database before making changes (y/n)?\n";
+    $stay=1;
+    while( $stay ){
+       $a=<stdin>;
+       chomp($a);
+       if( $a =~ /y/ii || $a=~/n/i ){ $stay=0;}
+       else { print "illegal answer. Say \"y\" or \"n\"!\n";}
+    }
+    #
+    if( $a=~/y/i ){
+       print "Making backup of Db to file \"$wetterdbbackup\" \n";
+       system("mysqldump -v --opt -c --allow-keywords --quote-names -u $dbUser -p$dbPassword -h $dbServer  $database >$wetterdbbackup" );
+       die "Error with database backup. Exit.\n" if( $?/256 ne 0 );
+
+       print "OK\n";
+    }
+}
+
+print "\nStarting to search for double defined rows ... \n";
+
+
+foreach $i (@tables){
+	# Get rows which have the same datetime value for the same sonsorid
+	# Actually no such rows should exist
+	# The expression t1.id < t2.id lists only those rows of a tuple
+	# of double defined with the smaller id, so only one row is
+	# printed for each pair of rows with equal datetime and sensid
+	# if one would like to see both rows: t1.id <> t2.id
+
+	$sql="SELECT t1.datetime,t1.id,t1.sensid,t1.stationid FROM $i AS t1 INNER
+	JOIN $i AS t2 ON t1.datetime=t2.datetime AND  t1.id < t2.id
+	AND t1.sensid = t2.sensid AND t1.stationid = t2.stationid 
+	order by datetime, sensid";
+
+	$ref=runSqlCommand($dbh, $sql);
+
+	# Columns are only datetime, id, sensid
+	$count=$#{@$ref} +1;
+	print "Found $count double rows in table \"$i\" that will be deleted\n" if( $count>=0);
+	if( $opt_v ){
+	   foreach $h (@$ref){
+		print "date: $h->[0], id: $h->[1], sensid: $h->[2], stationid: $h->[3] \n";
+	   }
+	}
+	
+	if( $opt_d && $count > 0 ){
+	     deleteRows( $dbh, $i, $ref, $count );
+	}
+	
+}
+
+closeDb($dbh);

@@ -1,0 +1,297 @@
+#!/bin/bash
+
+# WS2500 data extraction script.
+# Will try to extract data from station and insert values into 
+# mysql database
+# This script is not really beautiful, its kind of hacked
+# The main problem is that ws2500tomysql at the moment is not capable of
+# finding hanging mysql connections. So we have to fix this here which
+# is ugly....
+#
+# R. Krienke, krienke@uni-koblenz.de
+# $Id: getws2500data,v 0.7 2004/01/22 12:18:45 krienke Exp $
+
+
+# Where the program ws2500 and ws2500tomysql script can be found
+WS2500="/home/krienke/bin/ws2500"
+WS2500TOMYSQL="/home/krienke/bin/ws2500tomysql"
+
+# The temporary data file used for storing data extracted from station that in a
+# second step will be inserted into the mysql database. if this fails the data
+# are still available in the $DATAFILE that will not be deleted in this case
+DATAPATH="/home/krienke/lib/wetter"
+DATANAME="wetterdata.txt"
+DATAFILE="$DATAPATH/$DATANAME"
+LASTDATAFILE="$DATAPATH/lastValues.txt"
+
+# Use tolerance check feature:
+WS2500PARAM=" -n -t -p /dev/ttyS1 -C $LASTDATAFILE"
+
+# Do NOT use tolerance check feature:
+#WS2500PARAM=" -n -t -p /dev/ttyS1"
+
+ERRFLAG="$DATAPATH/dbInsertErr"
+LOGFILE="$DATAPATH/ws2500.log"
+
+# Admin who gets mail of failures
+ADMIN="krienke@robotnik"
+
+# Maximal runtime for insertion process. Used for detection hanging
+# processes. Time in seconds
+MAXRUNTIME=600
+#
+# ----- END OF CONFIGURATION ----------------------------
+
+
+# Read configuration file if existant
+#
+if [ -r ~/.getws2500data.conf ]; then
+	. ~/.getws2500data.conf
+elif [ -r /etc/ws2500/getws2500data.conf ]; then
+	. /etc/ws2500/getws2500data.conf
+fi	
+
+# ---------- End of config Variables ----------------------------------
+
+ARCHIVDATE=`date +%y%m`
+LOGDATE=`date +%y%m%d-%H%M`
+
+# Erros, from ws2500.h but positive
+E_ERROR="1"
+E_CMDXFER="2"
+E_DECODEDATA="3"
+E_NODATA="4"
+E_TRIMDATA="5"
+E_SETINTERFACE="6"
+E_GETNEXTDATASET="7"
+E_APPLIEDTOLCHECK="8"
+E_TOOMANYDROPOUTS="9"
+
+
+#
+# print help
+#
+doHelp() {
+	echo
+	echo "$0 [-h|-v]"
+	echo "   -h: print help"
+	echo "   -v: be verbose. Prints messages to stdout and logfile"
+	echo
+	exit 0
+}
+
+#
+# Write string to log file
+#
+doLog() {
+	echo "$1" >> $LOGFILE
+	if [ -n "$OPT_V" ]; then
+		echo "$1"
+	fi	
+}
+
+# append file to the logfile
+appendLog() {
+	cat "$1" >> $LOGFILE
+	if [ -n "$OPT_V" ]; then
+		cat "$1"
+	fi	
+}
+
+
+#
+# Parse commandline
+#
+while getopts vh var; do
+        case $var in
+                v)      OPT_V="1";;
+		h)	doHelp;;
+        esac
+done
+shift `expr $OPTIND - 1`
+
+
+# Make sure that only one process is running
+LOCKFILE=/tmp/getws2500.lck
+if [ -r "$LOCKFILE" ]; then
+        myname=`basename $0`
+        pid=`cat $LOCKFILE`;
+        c=`ps ax|grep $myname|awk '{print $1}'|grep -c $pid`
+        if [ "$c" -gt 0 ]; then
+                doLog "Another getws2500 process is running. Aborting"
+		mail -s "Another getws2500 process is running. Aborting `date`" "$ADMIN" <<EOF
+Another getws2500 process is running. Aborting.
+EOF
+                exit
+        else
+                echo $$ > $LOCKFILE
+        fi
+else
+        echo $$ > $LOCKFILE
+fi
+
+
+doLog "---  `date` ------------------------------------" 
+
+# 
+# Extract data from ws2500 weather station into local file.
+#
+doLog "* Running ws2500 ... " 
+$WS2500 $WS2500PARAM >> $DATAFILE 2> /tmp/ws2500.err
+ERR="$?"
+
+# If we received the error that no data could be received we simply try
+# again since this sometimes seems to happen without any particular
+# reason
+if [ "$ERR" = "$E_NODATA" ]; then
+   doLog "ws2500 failed with error $E_NODATA (timeout reading data), retrying..."
+   sleep 15
+   $WS2500 $WS2500PARAM >> $DATAFILE 2>> /tmp/ws2500.err
+   ERR="$?"
+fi
+
+if [ "$ERR" != "0" ]; then
+	mail -s "Error ($ERR) running ws2500, `date`" "$ADMIN" </tmp/ws2500.err
+	appendLog /tmp/ws2500.err
+	rm -f /tmp/ws2500.err
+
+	# Error E_APPLIEDTOLCHECK  means that tolCheck has applied. This is  OK 
+	# Err E_ TOOMANYDROPOUTS  means that one sensor had a dropoutcount 
+	# to high, go on
+	# anyway else exit
+	if [ "$ERR" != "$E_APPLIEDTOLCHECK" -a "$ERR" != "$E_TOOMANYDROPOUTS" ]; then
+	   exit 1
+	fi
+else
+	if [ -s /tmp/ws2500.err ]; then
+		appendLog /tmp/ws2500.err
+		rm -f /tmp/ws2500.err
+	fi	
+fi
+
+if [ ! -s $DATAFILE ]; then
+	doLog "No new data available. Exit."
+	exit 0
+fi
+
+
+# Test connection to mysql server
+doLog  "* Checking connection to dbserver (ws2500tomysql -t)" 
+
+( touch /tmp/ws2500tomysql-running;
+  $WS2500TOMYSQL -t > /tmp/ws2500.err 2>&1
+  echo $? > /tmp/ws2500.status
+ rm -f /tmp/ws2500tomysql-running
+) &
+
+sleep 1
+status=0;
+count=0;
+while [ -r /tmp/ws2500tomysql-running ]; do
+   count=$((count+1))
+   if [ $count -gt $MAXRUNTIME -a -r /tmp/ws2500tomysql-running ]; then
+   	killall ws2500tomysql 
+	status=1;
+	break
+   fi	
+   sleep 1
+done
+
+if [ -r /tmp/ws2500.status ]; then
+	status=$((status + `cat /tmp/ws2500.status`))
+	rm -f /tmp/ws2500.status
+fi
+if [ $status != "0" ]; then
+	mail -s "Error testing connection to MYSQL server `date`" "$ADMIN" </tmp/ws2500.err
+	doLog "* Error testing connection to MYSQL server:"
+	appendLog /tmp/ws2500.err
+	rm -f /tmp/ws2500.err
+	rm -f /tmp/ws2500
+	exit 1
+fi	
+
+#
+# look if last run failed, and try to fix it
+#
+if [ -r "$ERRFLAG" ]; then
+	doLog "* Last communication with dbserver seems to have failed."
+	doLog "* Try to recover. Running ws2500tomysql -R"
+	$WS2500TOMYSQL -R > /tmp/ws2500.err 2>&1 && rm $ERRFLAG
+
+	if [ -r "$ERRFLAG" ]; then
+	   (
+	   echo "There was an error transfering data to the mysqlserver" 
+	   echo "Tried running ws2500tomysql -R to ensure the dataintegrity"
+	   echo "but this failed as well. Waiting for manual inervention."
+
+	   )> $ERRFLAG
+
+	   doLog "Error running ws2500tomysql -R. Waiting for manual intervention"
+	   
+	   mail -s "Error inserting data into MYSQL server `date`" "$ADMIN" < "$ERRFLAG"
+	   rm -f /tmp/ws2500.err
+	   exit 1
+	fi
+	appendLog /tmp/ws2500.err 
+	rm -f /tmp/ws2500.err
+
+fi	
+
+# Now it seems everything is ok up to now.
+# Try and insert data	
+doLog "* Inserting data into dbserver"
+( touch /tmp/ws2500tomysql-running;
+ cat $DATAFILE|$WS2500TOMYSQL >/tmp/ws2500 2>/tmp/ws2500.err
+ echo $? > /tmp/ws2500.status
+ rm -f /tmp/ws2500tomysql-running
+) &
+
+sleep 1
+status=0;
+count=0;
+while [ -r /tmp/ws2500tomysql-running ]; do
+   count=$((count+1))
+   if [ $count -gt $MAXRUNTIME -a -r /tmp/ws2500tomysql-running ]; then
+   	killall ws2500tomysql 
+	status=1;
+	break
+   fi	
+   sleep 1
+done
+
+if [ -r /tmp/ws2500.status ]; then
+	status=$((status + `cat /tmp/ws2500.status`))
+	rm -f /tmp/ws2500.status
+fi
+if [ $status != "0" ]; then
+	mail -s "Error inserting data into MYSQl server `date`" "$ADMIN" </tmp/ws2500.err
+	doLog "* Error inserting data into MYSQl server:"
+	appendLog /tmp/ws2500.err
+	rm -f /tmp/ws2500.err
+	rm -f /tmp/ws2500
+	touch "$ERRFLAG"
+	exit 1
+else
+	if [ -s /tmp/ws2500.err ]; then
+		appendLog /tmp/ws2500.err
+		rm -f /tmp/ws2500.err
+	fi	
+fi	
+RESULT=`cat /tmp/ws2500|grep "Inserted"` 
+doLog "$RESULT"
+rm -f /tmp/ws2500
+
+
+# Data were inserted successfully, so delete temporary data file
+cd $DATAPATH
+mv "$DATAFILE" "$DATAPATH/$DATANAME-$LOGDATE"
+if [ -f old/$DATANAME.$ARCHIVDATE.tar ]; then
+        tar --remove-files -rf old/$DATANAME.$ARCHIVDATE.tar $DATAPATH/$DATANAME-$LOGDATE 2>/dev/null
+else
+        tar --remove-files -cf old/$DATANAME.$ARCHIVDATE.tar $DATAPATH/$DATANAME-$LOGDATE 2>/dev/null
+fi
+
+# Delete tmp outputfile of commands
+rm -f /tmp/ws2500.err
+
+exit 0 

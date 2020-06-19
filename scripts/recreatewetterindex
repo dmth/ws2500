@@ -1,0 +1,32 @@
+#!/bin/bash
+
+#
+# Script that generates SQL to recreate the table index files of all # wetter db tables
+# You can simply give this script a try there is no danger for your # data.
+# This may result in a considerable speed improvement reading wetter data 
+# if the index files of your tables have not been set optimal before.
+# It also removes and recreated the column "id" in each table because for 
+# some installations this counter id had non unique values which should not happen
+# deletion and recreation of id is not dangerous for your wetter data.
+# run this script like this:
+# ./recreatewetterindex | mysql --force -h <sqlhost> -u <dbuser> -p  <wetterdabasename>
+# Replace the parameters written in <> (including the two <> characters) with real names  of your setup. 
+#
+# R. Krienke, 06/2012
+
+SQL="";
+for i in th_sensors light pressure rain wind; do
+	SQL="${SQL}ALTER TABLE $i DROP id; #"
+	#SQL="${SQL}ALTER TABLE $i DROP  INDEX  id; #"
+	SQL="${SQL}ALTER TABLE $i ADD id INT(10) UNSIGNED NOT NULL auto_increment FIRST, ADD INDEX id (id); #"
+	#SQL="${SQL}ALTER TABLE $i ADD  INDEX  id (id); #"
+	SQL="${SQL}ALTER TABLE $i DROP INDEX dataindex; #" 
+	#
+	SQL="${SQL}ALTER TABLE $i ADD  INDEX dataindex (datetime,stationid,sensid); #"
+	# You might also try this variant, sometimes it seems to yield faster access to data
+	# if you want to use this variant uncomment below and put comment in # front of line from above
+	#SQL="${SQL}ALTER TABLE $i ADD  INDEX dataindex (stationid,sensid,datetime); #"
+	
+done
+
+echo $SQL|sed -e 's/#/\n/g'

@@ -1,0 +1,226 @@
+Copyright
+---------
+
+ws2500tomysql is written by Rainer Krienke and is distributed under the
+GNU General Public License. 
+
+
+Author and warrenty
+-------------------
+
+Rainer Krienke, krienke@uni-koblenz.de
+
+The author does not provide any warranty nor responsibility  for whatever might
+happen by using this program. If you run it things happen since YOU pressed the
+ENTER key. So if your dog starts barking at you or stops eating and looks 
+sick after you started the program, don't blame me ....
+
+
+
+Wat can it do?
+--------------
+
+This little Perl script will insert the data read by the program 
+ws2500 (with Option -t) from a ws2500(PC) weather station into a mysql
+database. It can as well create the database or only the tables needed
+in the database. Before you can use the script you have to fill in the
+database relevant Parameters (database name, mysql user name, ...) 
+
+
+
+
+Version
+-------
+
+see output of: ws2500tomysql -v
+
+Tested on a SuSE 10.0 Linux system with MYSQL 5.0.21
+
+
+Installation
+------------
+
+Just take care that you have the Perl DBI Modules installed. The script
+will need them. It will also need DBD::mysql. Of course you need perl.
+Thats all.
+
+
+Using it
+--------	
+
+First you have to create the database itself or if the database is
+already there just create the tables needed. The default database name
+is "wetter" (the german word for: weather). You can change this name in
+the script by modifying the variable $database if you like. This name as
+well as other configuration variables may be changed in the script
+itself or in a file $HOME/.ws2500tomysql.conf which is read upon
+startup. When creating the wetter database you can also give a non
+default name using option -d <name>. However you still have to configure
+the script variables and insert the name you chose in there later.
+
+Bevor running the script you have to modify the variables in the head of
+the script or in the .conf file: dbadmin & dbadminPw. 
+These two variables denote the database
+administrators accout and its password. They are only needed if you
+want the script to create the database itself.  The password may 
+possibly be empty if you mysql server allows everyone to create new 
+databases. You do not need these two variables if you create the database 
+manually. 
+
+Variables dbServer, dbUser, dbPassword are needed to insert data into
+the database. They denote the database user and his password of the use 
+who must have write access to the database. The last important variable
+to set is dbServer. This variable must contain the hostname of the MYSQl 
+database server. So its the name of the machine the MYSQL server is
+running on. It can be localhost if the MYSQL server is running on the
+same machine like the ws2500tomysql script. 
+If you give an invalid value to any of the variables just described 
+the script won't be able to connect to the mysql database!
+
+
+To create a new wetter database (deleting a possibly existing) you now
+can run 
+
+ws2500tomysql -c
+
+if you simly want to remove all tables of an existing wetter database
+and create new one you can also say
+
+ws2500tomysql -C
+
+One more item you may configure (but you do not have to) is a check that
+tests the input of ws2500tomysql and checks that only data from a set of
+known sensors is inserted into the database. This is done by setting the
+Variable %validSensIds inside the script with all sensor ids of existing
+sensor. To enable this check you additionally have to say $checkValidSensors=1.
+Sensor Ids are numbers and are assigned like this:
+
+Temp/Hum sensors: 		1..8
+Inside temp sensor: 		17
+Inside pressure sensor:      	20
+Wind sensor: 			30
+Rain sensor:  			40
+Light sensor:			50
+
+By default this check is disabled ($checkValidSensors=0).
+
+
+After you have created the database you can now insert data like this:
+
+ws2500 -t -n |ws2500tomysql 
+
+Note the -t -Option for the ws2500 program. ws2500tomysql can only
+handle terse output from ws2500, so always use -t here. You can of
+course also write the output of ws2500 to a file and then read in this
+file like:
+
+ws2500 -n -t > weather.data
+cat weather.data|ws2500tomysql
+
+You can also append several runs of ws2500 to a file and then insert the
+whole file into the mysql database:
+
+ws2500 -t -n > weather.data
+    				and some time later, perhaps by cron:
+ws2500 -t -n >> weather.data 
+cat weather.data|ws2500tomysql
+
+Please do not manually edit the output of ws2500 -t. Do not delete the
+any of the lines starting with a '#' !!!
+
+If anything with ws200tomysql goes wrong you can enable debugging with
+option -D. This will show a lot of output especially the SQL statements
+created for data insertion.
+
+
+How to avoid data loss
+----------------------
+
+MYSQL is a network capable database. So your weather station might be at
+one location, the database server 1000 km away. Even if your mysql
+server is running on a local maschine it might go down unexpectedly.
+Well such bad things tend to happen exactly when you read data from your
+weatherstation and insert them into the database. Believe me sooner or
+later it will happen. In this case there is a problem. Part of the data
+you read from the weather station has been inserted into the database
+another part not. So what now?
+
+To avoid the situation described abopve you can and should do two
+things:
+
+-  Never run ws2500tomysql like this: ws2500 -t |ws2500tomysql.
+   This will work, but if an error occurs you will loose data. The
+   better way is to store the stations data in a local file and then
+   start insertion into the database: ws2500 -t > file; 
+   cat file|ws2500tomysql
+
+- If an error occurs during the insertion of data in the MYSQL database
+  don't panic. ws2500tomysql can help to getting yout data right. Right
+  after the error occured you can start ws2500tomysql with the option
+  -R. This will remove all data from the database that has been inserted
+  in the last run that failed. However this is only possible if you use
+  -R right after the error occured when inserting data with
+  ws2500tomysql. If you start ws2500tomysql again to insert data, you
+  will not be able to automatically remove all the data of the failed
+  run. i
+  
+  Why remove this data? Simply because its the easiest way to avoid
+  missing or duplicate data. Since all data elements are removed that
+  were inserted in the run that lead to the error, you can afterwards
+  (after -R run) just run ws2500tomysql again. You simply repeat the
+  last insertion run completely. This is another reason why you should
+  store the data read from the station in a local file first, since in
+  this case you can just insert this complete file again into the database.
+  You simply have not to care about which data were already inserted and
+  which data still have to be inserted.
+
+
+Configuration of script
+-----------------------
+
+To do its work the script needs some date like the name of the database
+server, the database user and the password. If a new version of the
+script is released and you want to use it you have again to make these
+local changes again. To help you out of this situation you can write the
+scripts configuration that is defined in the head of the script into an
+extra file.
+
+You can either put the configuration in a file in the users HOME directory
+named .ws2500tomysql.conf or you can put the file ws2500tomysql.conf in
+the directory /etc/ws2500/   . Watch out: The latter file to be put in  
+/etc/ws2500/ has no leading dot (.) in its filename!
+
+It's really a good idea to put the configuration in a seperate file
+and not into the script itself, since in this case you will loose all
+your configurations if you upgrade the script to a newer version. If you
+put the configuration instead eg. in /etc/ws2500/ws2500tomysql.conf you
+will not have this problem.
+
+The config file contains
+perl code (assignments to variables) copied from the head of the script
+(see comments in the script itself). Just copy the defaults and adapt
+the values to your needs. Take care that your configuration settings are
+always correct according to the syntactical rules of the programming
+language perl. For example, this is correct:
+
+$dbUser="user";
+
+and this line is not correct:
+
+$dbUser="user"
+
+since the trailing ";" is missing which is always required at the end of
+a statement in Perl.
+
+
+Dataformat
+----------
+
+There is a description of the dataformat used as input to ws2500tomysql.
+The description is in german. You find it in the file 
+README.ws2500tomysql.dataformat
+
+
+Have lot of fun 
+Rainer Krienke
+03/2003

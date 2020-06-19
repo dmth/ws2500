@@ -1,0 +1,298 @@
+#!/usr/bin/perl
+
+require DBI;
+use Date::Calc qw(:all);
+
+$driver="mysql";
+$sysDbName="mysql";
+$dbadmin="root";
+$dbadminPw="";
+$dbServer="mysqlhost";
+$database="wettertest";
+$dbUser="krienke";
+$dbPassword="catch2calf";
+$defaultPort="3306";
+$debug=0;       # Global debug flag; activated by -D
+$|=10;          # Flush output on stdout after <n> chars
+
+
+
+sub connectDb{
+   my($dsn, $dbh);
+
+   # Connect to database
+   #
+   $dsn = "DBI:$driver:database=$database;host=$dbServer;port=$defaultPort";
+   if( ! ($dbh = DBI->connect($dsn, $dbUser, $dbPassword,
+        {'RaiseError' => 1, 'AutoCommit' => 0, 'PrintError' => 1, 'mysql_ssl' => 0 })) ) {
+       $errMsg="Cannot Connect to \"$dsn\" as $dbUser\n";
+       return(0);
+   }
+   return($dbh);
+}
+
+
+#
+# Close connection to database
+#
+sub closeDb{
+  my($dbh)=@_;
+
+  $dbh->disconnect();
+}
+
+
+#
+# Check if we can connect to mysql-Server
+#
+sub testMysqlConnection{
+   my($dbh, $sth, @row, $ret);
+
+   $dbh=connectDb();
+   if( !$dbh ){
+        exit 1;
+   }
+
+   @row=$dbh->selectrow_array("SHOW STATUS");
+   closeDb($dbh);
+
+   if( $#row >=0 ){
+   	$ret=0;
+        warn "Connection is OK\n";
+   }else{
+   	$ret=1;
+        warn "Connection FAILED\n";
+   }
+   return($ret); 
+}
+
+
+# Convert complete table to GMT time from localtime
+sub convertTable{
+   my($table)=shift;
+   my($ref,@d,@t, $dateRef, $i);
+   my($year,$month,$day, $hour,$min,$sec, $doy,$dow,$dst);
+   my($sql, $newDate, $newTime, $ret, $count);
+
+   print "\n* Convert table $table ... (each dot means 100 rows have been processed)\n";
+   print "Add new datetime column...\n";
+   # First we add a new datetime colum
+   $sql="ALTER TABLE $table add datetime DATETIME NOT NULL AFTER blocknr";
+   $dbh->do($sql);
+
+   $count=0;
+   $ref=$dbh->selectall_hashref("SELECT * FROM $table", "id");
+   if( !defined($ref) ){
+   	warn "Error reading from table $table. Abort\n";
+	return(-1);
+   }
+
+   print "Converting all rows...\n";
+   foreach $i (sort(keys(%{$ref}))){
+      $dataRef=$ref->{$i};
+      @d=split(/-/o, $date=$dataRef->{"date"});
+      @t=split(/:/o, $date=$dataRef->{"time"});
+      # Calculate time value from local time zone
+      #           Year, month, day, hour, minute, second
+ 
+      if( check_date($d[0], $d[1], $d[2]) && check_time($t[0], $t[1], $t[2]) ){
+	      $time=Mktime($d[0], $d[1], $d[2], $t[0], $t[1], $t[2]);
+
+
+	     # Convert time value into UTC
+	     ($year,$month,$day, $hour,$min,$sec, $doy,$dow,$dst) =
+        	      Gmtime($time);
+	     #print $dataRef->{"date"}, " ", $dataRef->{time}, "\n";
+	     #print "$year-$month-$day $hour:$min:$sec\n";
+
+	     $newDate=sprintf("%4d-%02d-%02d", $year, $month, $day);
+	     $newTime=sprintf("%2d:%02d:%02d", $hour, $min, $sec);
+	     
+	     # Build up sql update statement
+	     $sql="UPDATE LOW_PRIORITY IGNORE $table SET datetime=\"$newDate $newTime\"";
+	     $sql.=" WHERE id=" . $dataRef->{"id"} . " AND date=\"" . $dataRef->{"date"};
+	     $sql.="\" AND time=\"" . $dataRef->{"time"} . "\"";
+	     #print $sql, "\n";
+	     print "." if( ($count % 100) == 0 );
+	     $count++;
+	     $ret=$dbh->do($sql);
+
+	     #$ret=1;
+	     if( $ret != 1 ){
+     		die "\n* Error updating row in $table, $table.id=" . $dataRef->{"id"} . "\n",
+		    "Last SQL-Statement: $sql\n";
+
+	     }
+      }else{
+      	warn "\nInvalid Date or Time values in table $table, id ", $dataRef->{"id"}, "\n",
+	     "     skipped. Invalid Entry is: $d[0]-$d[1]-$d[2], $t[0]:$t[1]:$t[2] \n";
+      }     
+   }
+   
+   # Add a index to new datetime column
+   print "\nAdding index to new datetime col...\n";
+   $sql="ALTER TABLE $table ADD INDEX(datetime)";
+   $dbh->do($sql);
+
+   # Now drop old date and time cols. They are no longer needed   
+   print "Now dropping old date and time columns...\n";
+   $sql="ALTER TABLE $table DROP date";
+   $dbh->do($sql);
+   $sql="ALTER TABLE $table DROP time";
+   $dbh->do($sql);
+   print "\n";
+}
+
+
+# Signal handler for Quit signal
+sub doRollback{
+	die "\nConversion aborted\n";
+}
+
+
+#
+# Let the user enter his data
+#
+sub getUserData{
+   $stay=1;
+   while($stay){
+           print "Please enter data to access MYSQL weather database:\n";
+           print "Name of database server: ";
+           chomp(($dbServer=<STDIN>));
+
+           print "Database name:           ";
+           chomp(($database=<STDIN>));
+
+           print "Database username:       ";
+           chomp(($dbUser=<STDIN>));
+
+           print "Database password:       ";
+           chomp(($dbPassword=<STDIN>));
+
+           print "\n";
+           print "Database name:    $database \n";
+           print "Database server:  $dbServer \n";
+           print "Database user:    $dbUser \n";
+           print "Database password:$dbPassword \n";
+           print "\nAre these values OK (y/n)\n";
+           chomp(($answer=<STDIN>));
+
+           print "\n\n";
+           if( $answer eq "y" ){
+		   # Testing connection
+		   warn "\nTesting connection to mysql server .... \n";
+		   $stay=testMysqlConnection();
+		   warn "\n";
+           }	
+   }	
+   
+}
+
+
+#
+# Explain what we will do ....\n";
+#
+sub printHello{
+warn <<EOF
+
+This script will convert all tables (except  for table errors) so that the
+date and time values in each row are in GMT time instead of local time. it will
+also convert the date and time columns in each table to a single datetime
+column Please take care of the fact that  these data are really in local time
+format not already in GMT (eg this script is run for the second time on
+the database without restoring the roriginal data) since the script cannot
+check this.
+
+Before anything is converted a backup from the complete database will be
+created. Just in case... The conversion of all date values to GMT has the
+advantage that there is no longer any hassle  with daylight saving time
+(Dst) which up to now led to the strange effect that eg temperature in the
+morning is during summertime displayed one hour in advance which leas to
+wrong values". Another problem up to now was that in the phase when Dst
+started or ended there was a either a hole of one hour in your data or the
+data were written twice. This will no longer happen.
+
+If any error occurs, the script will tell you. Your best choice if to
+recover your data from teh backup that has been saved to the file. The
+script will tell you how.
+
+EOF
+;
+}
+
+#
+# Check if table has already the new datetime column. If yes
+# we do not convert it again.
+#
+sub checkTable{
+   my($table)=shift;
+   my($sth, $f, $name, $i, $convert);
+   
+   $convert=1;
+   
+   $sth=$dbh->prepare("select * from $table limit 1");
+   $sth->execute;
+   $f=$sth->{NUM_OF_FIELDS};
+   for ($i=1;$i<=$f;$i++) {
+        $name=$sth->{NAME_lc}->[$i-1];
+        $convert=0 if ($name eq 'datetime') ;
+   }
+   
+   $sth->finish();
+   return($convert);   
+   
+}
+
+# --------- main ---------------------------------------
+# Check for previous run
+if( -r "wetterdb.dmp" ){
+	die "\nFound database backupfile wetterdb.dmp that probably was created by a previous\n",
+	    "run of this script. Since a second run would overwrite the backup and so your\n",
+	    "original data might be removed we stop here. If you really intend to\n",
+	    "run this script another time, please save the original backup file\n",
+	    "wetterdb.dmp to somewhere else and then restart the script.\n\n"; 
+}
+
+
+printHello();
+getUserData();
+
+$SIG{'HUP'} =  'doRollback';
+$SIG{'INT'} =  'doRollback';
+
+$dbh=connectDb();
+
+# Make a backup from complete database
+warn "Will make backup copy of database to file \"wetterdb.dmp\"\n",
+     "If something goes wrong just call:\n",
+     "cat wetterdb.dmp|mysql -h <mysqlhost> -u <user> -p<password> <original_wetter_dbname\n",
+     "to get the old values back (words in <> have to replaced by real values)\n", 
+     "Starting backup.... \n";
+     
+$ret=system("mysqldump --opt -c $database -u $dbUser -p$dbPassword -h $dbServer  >wetterdb.dmp");
+if( $ret/256 ){
+	die "Error creating back of database\n";
+}else{
+	warn "Backup is OK !!!\n\n";
+}
+
+
+@tables=("th_sensors", "inside", "light", "rain", "wind");
+
+eval{  # This eval will dy if an error occurs because RaiseError is set to true above
+   foreach $i (@tables){
+   	   if( checkTable($i) ){
+	   	$ret=convertTable($i);
+	   }else{
+	   	warn "Table $i has already been converted. Skipped!\n";
+	   }	
+   }
+   $dbh->commit();
+};	
+if( $@ ){
+      warn "Conversion aborted because $@ \n",
+      	   "Will try to roll back (undo) changes. \n";;
+      $dbh->rollback(); 	# undo the incomplete changes
+}
+
+closeDb($dbh);

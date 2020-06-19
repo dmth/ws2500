@@ -1,0 +1,60 @@
+Author and warrenty
+-------------------
+
+Rainer Krienke, krienke@uni-koblenz.de
+
+The author does not provide any warranty nor responsibility  for whatever might
+happen by using this program. If you run it things happen since YOU pressed the
+ENTER key. So if your dog starts barking at you or stops eating and looks 
+sick after you started the program, don't blame me ....
+
+
+
+Wat can it do?
+--------------
+
+The removedoublerow script will search your wetter database for rows
+that have the same datetime value for the very same sensor- and station-id.
+Expressing this more easy we look for  double defined data rows of a certain
+sensor & station. This happens very rarely but in certain error conditions (no
+connection to MYSQL-Server when inserting weather data) this seems to
+happen sometimes. These double rows do not do any harm, but they waste
+space and lead to warnings in the bottom section of wetter.cgi script.
+So the best is to remove  one of each of these double defined rows, 
+that really should not exist at all.
+
+
+Configuration
+-------------
+
+You can put the configuration in a file in the users HOME directory
+named .ws2500tomysql.conf or you can put the file ws2500tomysql.conf in
+the directory /etc/ws2500/  . Basically the script needs the database
+server name, the database user name and the database password.
+
+
+Running the script
+------------------
+
+Just calling the script without any options will search for double
+defined rows but will not delete them, so your database will not be
+modified. The output of the script only shows the number of rows that
+are defined twice for each table. It will not show the rows. If you want
+to see the rows (only the id, datetime, sensid, stationid) you can start
+the script with option -v. Please note: The output will show only the
+first of each double defined row. So in the output you will not see any
+two identical rows but only one having a identical buddy in the database
+that is not shown.
+
+If you decide to let the script delete the double defined rows, you have
+to call it with option "-d". In this case it will ask you first if it
+should create a database backup using mysqldump. Next it will start to
+search and delete (one of each) rows that exist twice. To avoid beeing
+asked you can call the script additionally with the option -n. In this
+case no question will be asked and no backup will be made before
+deleting double rows.
+
+
+Have lot of fun 
+Rainer Krienke
+01/2006

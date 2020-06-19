@@ -1,0 +1,54 @@
+#! /bin/sh
+# Copyright (c) 1996-2002 SuSE Gmbh Nuernberg, Germany.
+#
+# Author: Florian La Roche, 1996, 1997
+#	  Werner Fink <feedback@suse.de>, 1996, 1999-2002
+#
+### BEGIN INIT INFO
+# Provides:       chrony
+# Required-Start: $remote_fs $syslog $named
+# Required-Stop: $remote_fs $syslog
+# Default-Start:  3 5
+# Default-Stop:   
+# Description:    Start chronyd time server
+### END INIT INFO
+
+. /etc/rc.status
+rc_reset
+case "$1" in
+    start)
+	echo -n "Starting chronyd"
+	startproc /usr/sbin/chronyd > /dev/null 2>&1
+
+	rc_status -v
+	;;
+    stop)
+	echo -n "Stopping chronyd"
+	killproc -TERM /usr/sbin/chronyd
+	rc_status -v
+	;;
+    try-restart)
+	$0 stop && $0 start
+	rc_status
+	;;
+    restart)
+	$0 stop
+	$0 start
+	rc_status
+	;;
+    reload|force-reload)
+	echo -n "Reload service fetchmail"
+	killproc -p $srvpid -HUP /usr/bin/fetchmail
+	rc_status -v
+	;;
+    status)
+	echo "Not implemented"
+	;;
+    probe)
+	echo "Not implemented"
+	;;
+    *)
+	echo "Usage: $0 {start|stop|status|try-restart|restart|force-reload|reload|probe}"
+	exit 1
+esac
+rc_exit

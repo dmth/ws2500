@@ -1,0 +1,71 @@
+Copyright
+---------
+
+wetterdbbackup is written by Rainer Krienke and is distributed under the
+GNU General Public License.
+
+
+Author and warrenty
+-------------------
+
+Rainer Krienke, krienke@uni-koblenz.de
+
+The author does not provide any warranty nor responsibility  for
+whatever might
+happen by using this program. If you run it things happen since YOU
+pressed the
+ENTER key. So if your dog starts barking at you or stops eating and
+looks
+sick after you started the program, don't blame me ....
+
+
+
+Wat can it do?
+--------------
+
+wetterdbbackup is a simple shell script that allows you to backup your
+MYSQL weather database to a (compressed) file. The script will keep 3
+generations of the backup so in case you loose your data you can
+recreate the database from the most recent 3 backups you have.
+
+The backup file contains sql staements that can be piped into the mysql
+binary to insert all the data into an empty database. The database
+itself has to exist already. You may create it for example with
+ws2500tomysql -c. Then you can insert data with a command like the one
+below:
+
+gzip -dc wetterbackup.gz|mysql -h sqlhost -u user -p   wetterdb
+
+
+Configuration
+-------------
+
+The script only needs minimal configuration in the head of the script. You
+have to say where the script should write the backupfile and you have to
+give the name of the weather database as well as the mysql user and the
+users mysql password to access the database. You have to specify the
+following variables:
+
+BACKUPDIR="/home/krienke/lib/wetter"	# directory for backup
+FILE="wetter.backup.sql"		# filename for backup 
+DATABASE="wetter"			# Name of database
+DBUSER="mysqluser"			# MYSQl user for database
+DBPASSWD="password"			# Database password
+SQLSERVER="sqlhost			# Database server
+
+
+Rnning the script
+-----------------
+
+Probably the best way to run the script is by calling it via cron
+regularly. An entry that would start the backup each moring at 09:00
+would be for example:
+
+0 9  * * *  ~krienke/bin/wetterdbbackup
+
+To add this line to the list of your cron jobs use the command
+"crontab". Most probably this will open the editor vi for you to insert
+teh command. In vi you first have to enter a  R  and the type the line,
+then type the ESC key and then :wq to write the file back on disk.
+
+If you like you can of course also run the command manually.... :-)

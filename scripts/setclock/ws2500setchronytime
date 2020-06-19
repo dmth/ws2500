@@ -1,0 +1,38 @@
+#!/bin/bash
+
+#
+# Program to set time to a chronyd NTP time server from a ws2500 weather station
+# All messages are also logged to syslog (/var/log/messages). The time is only set
+# if ws2500 reports the time to be a valid DCF time.
+#
+# R. Krienke, krienke@uni-koblenz.de
+# 02/2004
+
+
+# get current time from weather station
+T=`/usr/local/bin/ws2500 -u 2`
+
+RES=$?
+if [ $RES = "0" ]; then
+   P=`pidof chronyd`
+   # if chrony is not running, start it now ....
+   if [ -z "$P" ]; then
+	/etc/init.d/chrony stop
+	/etc/init.d/chrony start
+	sleep 1
+   fi
+   # Chrony may use a password it is set to robi below.
+   # The password has to be set in the chrony setup
+   # using the chronyc command and the password option
+   /usr/bin/chronyc  <<-EOF |logger -t setchronytime -s
+	password mypassword
+	settime $T
+	quit
+	EOF
+else
+	if [ $RES -eq 50 ]; then
+  	   logger -t setchronytime -s "DCFtime in ws2500 not in sync. Time not used."
+	else
+	   logger -t setchronytime -s "Cannot get time from weatherstation"
+	fi
+fi

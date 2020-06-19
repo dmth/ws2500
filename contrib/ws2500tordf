@@ -1,0 +1,433 @@
+#!/usr/bin/perl
+#
+#  2003-04-11	now it writes ONLY a RDF file to stdout, which can read by
+#		some or maybe any newsticker clients e.g. set top box
+#  		[MiGe]	michael@gerber.tv
+# changes:
+# 2003-04-27 tdressler@tdressler.net
+#		remove most code from wetter.cgi
+#		modified link information to single sensor today
+# 2003-06-08 tdressler@tdressler.net
+#		modified for new rain logic
+# based on:
+# Perl CGI-Module for web-displaying weather data
+# R. Krienke, krienke@uni-koblenz.de
+
+
+use CGI qw(:standard);
+use Date::Calc qw(:all);
+require DBI;
+use Carp;
+
+# --------- Change this ! ----------
+$wettercgi="http://tdressler.dnsalias.org/cgi-bin/wetter.cgi";
+$description="Wetter in Langerwehe";
+$allPlots="TH,PR,WI,LI,RA"; # Plots that can be created. At the moment you
+			       # may omit LI so the light sensor is NOT displayed
+#$allPlots="TH,PR,WI,RA,PY";  # No Light sensor
+$driver="mysql";
+$sysDbName="mysql";
+$dbServer="localhost";
+$dbUser="user";
+$dbPassword="password";
+$database="wetter";
+$defaultPort="3306";
+$firstDate="2003-03-20"; # Approximate date of first database entry; yy-mm-dd
+#$database="wettertest";
+# ----------------------------------
+
+# Needed only on solaris systems with lib in /usr/local:
+$ENV{'LD_LIBRARY_PATH'}='/lib:/usr/lib:/usr/local/lib';
+# Useful quite everywhere:
+$ENV{'PATH'} = '/bin:/usr/bin:/sbin:/usr/sbin';
+
+
+($firstYear, $firstMon, $firstDay)=split(/-/, $firstDate);
+
+$tmpName="$$";
+
+$link1="<link>$wettercgi";
+$link2="</link>\n<description>$description</description>";
+
+#
+#  Connect to database and return databasehandle
+#
+sub connectDb{
+   my($dsn, $dbh);
+
+   # Connect to database
+   #
+   $dsn = "DBI:$driver:database=$database;host=$dbServer;port=$defaultPort";
+   if( ! ($dbh = DBI->connect($dsn, $dbUser, $dbPassword,
+        { 'RaiseError' => 1, 'AutoCommit' => 1, 'PrintError' => 0 })) ) {
+       $errMsg="Cannot Connect to \"$dsn\" as $dbUser\n";
+       return(0);
+   }
+   return($dbh);
+}
+
+
+#
+# Close connection to database
+#
+sub closeDb{
+  my($dbh)=@_;
+
+  $dbh->disconnect();
+}
+
+#
+# Run a sql command
+# This routine can as well modify the received data in order to
+# calculate difference values eg for rain sensor data
+#
+sub runSqlCommand{
+   my($dbh, $sql, $file, $diff, $refMmaVals, $fakeVals)=@_;
+   my($i, $j, $k, $v);
+   my($ref, $ref1, $c1, $c2);
+   my(@old, $first);
+
+   open( OUT, ">$file") || die "Cannot open $file for writing\n";
+
+   $ref = $dbh->selectall_arrayref("$sql");
+   $c1=$#{$ref};
+   $first=1;
+   for($i=0; $i <= $c1; $i++){
+   	$ref1=${$ref}[$i];
+	$c2=$#{$ref1};
+	for($j=0; $j<=$c2; $j++){
+		# Calculate delta values if $diff is not null
+		if( $diff && $j >=2 ){ # First 2 cols are date & time
+		   if( $first ){
+		   	$v=0;
+			$first=0;
+		   }else{
+		   	$v=${$ref1}[$j] - $old[$j];
+		   }
+		   print OUT ($v<0?0:$v) * $diff, "\t";
+		   $old[$j]=${$ref1}[$j];
+		}else{
+		   print OUT ${$ref1}[$j], "\t";
+		   $old[$j]=${$ref1}[$j];
+		}
+	}
+	# For plotting min, max, and average values print
+	# the values as additional columns
+	# These values are never difference values but absolute data
+	for($k=0; $k < $fakeVals; $k++){
+	   print OUT ${$refMmaVals}[$k], "\t";
+	}
+
+	print OUT "\n";
+   }
+   close(OUT);
+
+   # Gnuplot does not like empty files, if eg there were not data in the
+   # selected period of time. If the result file of the queury is zero
+   # bytes in size we fake an entry in this file to make gnupolot happy
+   if( -z "$file" ){
+   	open( OUT, ">$file") || die "Cannot open $file for writing\n";
+	print OUT "$startDate\t00:00:00\t0\t0\t0\t0\t0\t0\t0\t0\n";
+	close(OUT);
+   }
+}
+
+
+
+#
+# Get latest values from sensors for all sensors given in \%$sens
+#
+sub getLatestValues{
+   my($dbh, $sens)=@_;
+   my($i, $j, $sql, $sth, $table, @res, @res1);
+   my($tmp, $tmp1);
+
+   foreach $i (keys(%{$sens})){
+      $table=${$sens}{$i}->{"table"};
+      foreach $j ( @{${$sens}{$i}->{"sensorids"}} ){
+      	 $sql="SELECT * FROM $table WHERE sensid=$j";
+	 $sql.=" ORDER by date DESC,time DESC,id DESC LIMIT 2";
+
+	 # Query database for min, max and average of sensor
+	 $sth = $dbh->prepare($sql);
+	 $sth->execute;
+	 # Fetch the two latest rows. We need two for values that encode a difference
+	 # like the rain sensor
+	 @res= $sth->fetchrow_array;
+	 @res1=$sth->fetchrow_array;
+	 # if there is a datediff value given, than we need to fetch
+	 # the latest entry and the first one of the date given in
+	 # datediff. This is needed eg for calculating how much rain
+	 # fell "today"
+	 if( ${$sens}{$i}->{"datediff"} ){
+	    $tmp=${$sens}{$i}->{"datediff"};
+	    $tmp1=${$sens}{$i}->{"dbcolName"};
+      	    $sql="SELECT SUM($tmp1) FROM $table WHERE date=\"$tmp\" AND sensid=$j";
+	    @res1=$dbh->selectrow_array($sql);
+	 }
+	 if( $#res>=0  && $#res1>=0 ){
+            # Store results
+	    ${$sens}{$i}->{"sensorval"}->{"$j"}=[ join(",", @res), join(",", @res1)];
+	 }else{
+            warn "Error getting min,max,av values running \"$sql\"\n";
+	 }
+      }
+   }
+}
+
+
+
+#
+# convert an angle into a winddirection like N,S,E,W
+#
+sub windDir{
+   my($d,$d,$d,$d,$d, $speed, $angleVal, $var, $d)=@_;
+   my($angle);
+
+   $angle=($angleVal+($var/2))%360;
+
+   return("N")   if( $angle>(360-22.5) || $angle<= 22.5 );
+   return("NE")  if( $angle > 22.5 && $angle <= 67.5);
+   return("E")   if( $angle > 67.5 && $angle <= 112.5 );
+   return("SE")  if( $angle > 112.5 && $angle <= 157.5);
+   return("S")   if( $angle > 157.5 && $angle < 202.5);
+   return("SW")  if( $angle > 202.5 && $angle <= 247.5);
+   return("W")   if( $angle > 247.5 && $angle <= 292.5 );
+   return("NW")  if( $angle > 292.5 && $angle <= 337.5);
+}
+
+
+#
+# convert wind variance to a plus/minus value
+#
+sub windVar{
+   my($d,$d,$d,$d,$d, $speed, $angleVal, $var, $d)=@_;
+
+   return( $var/2 );
+
+}
+
+#
+# Print out the latest data values fetched before from the database
+# All values are in a hash to which a reference is passed to this function
+#
+#	     print $sep1 if( $k != $#{$sens->{"dbcols"}} );
+
+sub printLatestData{
+   my($sens)=shift;    # is a Reference to hash
+   my($sep1, $sep2)=@_;
+   my($id, $j, $k, $dateDiff, $tmp, $tmp1, $tmp2, @val1, @val2);
+   my($fc,$fcc);
+
+   $fc="";
+   $fcc="";
+
+
+
+   $dateDiff=$sens->{"datediff"};
+   # Iterate over all sensorids from the type $i
+   for($j=0; $j<= $#{$sens->{"sensorids"}}; $j++ ){
+      print ("\n<item>\n<title>");
+      # Get values (raw row from databse table
+      $id=$sens->{"sensorids"}->[$j];
+      @val1=split( /\s*,\s*/, $sens->{"sensorval"}->{$id}->[0] );
+      @val2=split( /\s*,\s*/, $sens->{"sensorval"}->{$id}->[1] );
+      print $sens->{"sensornames"}->[$j], ": ";
+      # Iterate over all database columns (values) to be printed for that sensor
+      for($k=0; $k <= $#{$sens->{"dbcols"}}; $k++ ){
+	     print $sens->{"valuename"}->[$k], ": "
+	                        if(length($sens->{"valuename"}->[$k]));
+	     # store value to print
+	     $tmp1=$val1[ $sens->{"dbcols"}->[$k] ];
+	     # check if there is an converter for this value defined
+	     if( $sens->{"converter"}->[$k] ){
+	     	$tmp=$sens->{"converter"}->[$k];
+		# call converter
+		$tmp1=&$tmp(@val1);
+	     }
+	     if ($sens->{"factor"}->[$k] gt '' ){
+	        $faktor=$val1[ $sens->{"factor"}->[$k] ];
+			$tmp1*=$faktor;
+             }
+	     if( !length($dateDiff) ){
+	 	 print $tmp1," ", $sens->{"sensorunits"}->[$k];
+	     }else{
+		 # This is the rain sensor
+		 $tmp2=$val2[ $sens->{"dbcols"}->[$k] ];
+		 $tmp2*=$sens->{"unitfactor"} if( $sens->{"unitfactor"} );
+
+		 # Colorize printed value if wanted
+		 #if( $sens->{"sensorcolor"}->[$k] && $tmp2 != 0 ){
+		 #	$fc=~s/##/$sens->{"sensorcolor"}->[$k]/;
+	 	 #	print $fc,$tmp2, $fcc;
+		 #}else{
+	 	 print $tmp2;
+		 #}
+		 print  " ",$sens->{"sensorunits"}->[$k];
+	     }
+	     # print $sep1 if( $k != $#{$sens->{"dbcols"}} );
+	     print ", " if( $k != $#{$sens->{"dbcols"}} );
+      }
+      $param="?pl=".$sens->{"plot"}.";sd=$startdate;ed=$enddate";
+      print ("</title>\n$link1$param$link2\n</item>\n");
+
+   }
+}
+
+
+
+
+# ============================================================
+# ----- main -------------------------------------------------
+# ============================================================
+
+($tYear, $tMonth, $tDay)=Today([0]); 	# Get todays date
+$today="$tYear-$tMonth-$tDay";
+$endDate=$today;			# Default endDate
+$endDay=$tDay;
+$endMon=$tMonth;
+$endYear=$tYear;
+# Show initially data of the last  week
+#-($startYear, $startMon, $startDay)=
+#		Add_Delta_Days($endYear, $endMon, $endDay, -7); # 1 weeks
+#$startDate="$startYear-$startMon-$startDay";
+$startDate=$today;
+@months=("-", "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep",
+	"Oct", "Nov", "Dec");
+@plots=split(/,/, $allPlots);
+# print html stuff
+# start writing the rdf header
+
+print ("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n<rdf:RDF\n");
+print ("xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"\n");
+print ("xmlns=\"http://my.netscape.com/rdf/simple/0.9/\">\n");
+#
+print ("\n<channel>\n");
+print ("<title>$description</title>\n");
+print $link1.$link2;
+print ("</channel>\n\n");
+#
+$dbh=connectDb();			# Connect with Database
+if( !$dbh ){
+
+	print ("\n</rdf:RDF>\n");
+	exit 1;
+
+}
+foreach $plot (@plots) {
+#
+# Now get the latest values of all sensors given below
+# Sensors are given by their id
+# Some of the values are not used for getting the latest data
+# but for printing them in printLatestData()
+#
+	if ($plot eq "TH") {
+		$latestSens{"temp"}->{"sensorids"}=[1,17];
+		$latestSens{"temp"}->{"sensornames"}=["Außen","Innen"];
+		$latestSens{"temp"}->{"dbcols"}=[5];	# Column number starting with 0!
+		$latestSens{"temp"}->{"sensorunits"}=["°C"];
+		$latestSens{"temp"}->{"valuename"}=["Temperatur"];
+		$latestSens{"temp"}->{"table"}="th_sensors";
+		$latestSens{"temp"}->{"plot"}="TH";
+
+		$latestSens{"hum"}->{"sensorids"}=[1,17];
+		$latestSens{"hum"}->{"sensornames"}=["Außen","Innen"];
+		$latestSens{"hum"}->{"table"}="th_sensors";
+		$latestSens{"hum"}->{"dbcols"}=[6];
+		$latestSens{"hum"}->{"sensorunits"}=["%"];
+		$latestSens{"hum"}->{"valuename"}=["Feuchte"];
+		$latestSens{"hum"}->{"plot"}="TH";
+	}
+	if ($plot eq "RA") {
+		$latestSens{"rain"}->{"sensorids"}=[40];
+		$latestSens{"rain"}->{"sensornames"}=["Regen"];
+		$latestSens{"rain"}->{"table"}="rain";
+	# Special case for rain sensor; SUM($dbcolName) is caculated for this one col
+		$latestSens{"rain"}->{"dbcolName"}="diff";
+		$latestSens{"rain"}->{"dbcols"}=[0];
+		$latestSens{"rain"}->{"sensorunits"}=["mm"];
+		$latestSens{"rain"}->{"unitfactor"}="0.001";
+		$latestSens{"rain"}->{"sensorcolor"}=["#0000ff"];
+	# This specifies the date from when a diff up to now will be calculated
+	# Today means: take the difference from the first value of today up to
+	# now to calculate difference
+		$latestSens{"rain"}->{"datediff"}="$today";
+		$latestSens{"rain"}->{"valuename"}=["Menge(ges. heute)"];
+	}
+	if ($plot eq "WI") {
+		$latestSens{"wind"}->{"sensorids"}=[30];
+		$latestSens{"wind"}->{"sensornames"}=["Wind"];
+		$latestSens{"wind"}->{"table"}="wind";
+		$latestSens{"wind"}->{"dbcols"}=[5,6,7];
+		$latestSens{"wind"}->{"sensorunits"}=["Km/h", " ", "°"];
+		$latestSens{"wind"}->{"valuename"}=["Geschw.", "Richtung", "Varianz +/-"];
+		$latestSens{"wind"}->{"converter"}=["", \&windDir, \&windVar];
+		$latestSens{"wind"}->{"plot"}="WI";
+	}
+	if ($plot eq "PR") {
+		$latestSens{"pressure"}->{"sensorids"}=[20];
+		$latestSens{"pressure"}->{"sensornames"}=["Luftdruck"];
+		$latestSens{"pressure"}->{"table"}="inside";
+		$latestSens{"pressure"}->{"dbcols"}=[5];
+		$latestSens{"pressure"}->{"sensorunits"}=["hPa"];
+		$latestSens{"pressure"}->{"valuename"}=[""];
+		$latestSens{"pressure"}->{"plot"}="PR";
+	}
+
+	if( $plot eq "LI" ){
+   		$latestSens{"light"}->{"sensorids"}=[50];
+   		$latestSens{"light"}->{"sensornames"}=["Helligkeit"];
+   		$latestSens{"light"}->{"table"}="light";
+   		$latestSens{"light"}->{"dbcols"}=[8];
+   		$latestSens{"light"}->{"sensorunits"}=["Lux"];
+   		$latestSens{"light"}->{"valuename"}=[""];
+		# factor field may be on position [10]
+   		$latestSens{"light"}->{"factor"}=[9];
+		$latestSens{"light"}->{"plot"}="LI";
+	}
+}
+getLatestValues($dbh, \%latestSens);
+
+
+#
+# print out an overview of current values
+#
+# Get date of sensor with sensid "1"
+@tmp=split(/\s*,\s*/, $latestSens{"temp"}->{"sensorval"}->{"1"}->[0]);
+@tmp1=split(/-/, $tmp[3]);
+
+$startdate=$tmp[3];
+$enddate=$tmp[3];
+print
+print ("<item>\n");
+print ("<title>Wetter am $tmp1[2].$tmp1[1].$tmp1[0] um " . $tmp[4]);
+print (" Uhr</title>\n");
+print $link1."?sd=$startdate;ed=$enddate".$link2;
+print ("</item>\n");
+
+
+foreach $plot( @plots){
+   #
+   	if ($plot eq "TH") {
+   		printLatestData($latestSens{"temp"}, ", ", "<br>");
+   		printLatestData($latestSens{"hum"}, ", ", "<br>");
+	}
+	if ($plot eq "WI") {
+		printLatestData($latestSens{"wind"}, ", ", " ");
+	}
+	if ($plot eq "RA") {
+   		printLatestData($latestSens{"rain"}, ", ", " ");
+	}
+	if ($plot eq "PR") {
+   		printLatestData($latestSens{"pressure"}, ", ", " ");
+	}
+  	if( $plot eq "LI" ){
+      		printLatestData($latestSens{"light"}, ", ", " ");
+	}
+}
+
+
+
+print ("\n</rdf:RDF>\n");
+
+closeDb($dbh);

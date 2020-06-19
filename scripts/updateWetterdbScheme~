@@ -1,0 +1,311 @@
+#!/usr/bin/perl
+
+# Script that will update a wetter MYSQL database to the new format
+# starting with version ws2500-0.96. To run this script the database 
+# should at least have the scheme that was introduced in version
+# ws2500-0.70. 
+# 
+# R. Krienke 02/2012, krienke@uni-koblenz.de
+#
+require DBI;
+
+
+$driver="mysql";
+$sysDbName="mysql";
+$dbServer="mysqlhost.uni-koblenz.de";
+$dbUser="user";
+$dbPassword="password";
+$database="wetter";
+$defaultPort="3306";
+
+
+#
+#  Connect to database and return databasehandle
+#
+sub connectDb{
+   my($dsn, $dbh);
+
+   # Connect to database
+   #
+   $dsn = "DBI:$driver:database=$database;host=$dbServer;port=$defaultPort";
+   if( ! ($dbh = DBI->connect($dsn, $dbUser, $dbPassword,
+        { 'RaiseError' => 0, 'AutoCommit' => 1, 'PrintError' => 0 })) ) {
+       $errMsg="Cannot Connect to \"$dsn\" as $dbUser\n";
+       return(0);
+   }
+   return($dbh);
+}
+
+
+#
+# Close connection to database
+#
+sub closeDb{
+  my($dbh)=@_;
+
+  $dbh->disconnect();
+}
+
+sub runBackup {
+   my($ret);
+
+   warn "Running backup of database to file \"wetterdb-backup.sql\" ...\n";
+
+   if( -r "wetterdb-backup.sql" ){
+   	die "Backupfile \"wetterdb-backup.sql\" exists already.\nPlease move it elsewhere and restart script.\n\n";
+   }
+   $ret=system("mysqldump --opt -c $database -u $dbUser -p$dbPassword -h $dbServer >wetterdb-backup.sql");
+   if( $ret/256 ){
+     die "Error creating back of database\n";
+   }else{
+     warn "Backup is OK !!!\n\n";
+   }
+}
+
+
+#---gustspeed, gustangle --------------------------------------------------------------------------------------------------------
+#
+# check if database already has new scheme
+#
+sub checkNewSchemeGust{
+   my($dbh)=shift;
+   my($sth, $resRef, $start, $row);
+
+   $sth=$dbh->prepare("describe wind");
+   $sth->execute;
+   $resRef=$sth->fetchall_arrayref();
+
+   # Check if database has already new format
+   $start=0;
+   foreach $row (@$resRef){
+           foreach $i (@$row) {
+                $start=1 if( $i=~/gust/ );
+           }
+   }
+   
+   if( $start ){ 
+      return(1) ;  # New scheme
+   }else{
+      return(0);   # Old scheme
+   }   
+}
+
+
+#
+# Change DB-Scheme to ne one
+#
+sub alterSchemeGust{
+   my($dbh)=shift;
+   my($i, $sql, $numRows, $numRows1, $sth, $resRef, $type, $id);
+   
+   
+   #
+   # Rename inside table
+   #
+   $sql="ALTER TABLE wind ADD gustspeed float(5,1) DEFAULT 0, ADD gustangle SMALLINT(3) UNSIGNED DEFAULT 0";
+   print "Running \"$sql\" ...\n";
+   $numRows=$dbh->do($sql);
+   if(!defined($numRows)){
+      warn "* Error adding fields to table wind\n" 
+   }else{
+      print "+ OK, added gustspeed and gustangle columns to table wind.\n";
+   }
+   undef $numRows;   
+}
+
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+#----rad, uv --------------------------------------------------------------------------------------------------------------
+#
+# check if database already has new scheme
+#
+sub checkNewSchemeRadUv{
+   my($dbh)=shift;
+   my($sth, $resRef, $start, $row);
+
+   $sth=$dbh->prepare("describe light");
+   $sth->execute;
+   $resRef=$sth->fetchall_arrayref();
+
+   # Check if database has already new format
+   $start=0;
+   foreach $row (@$resRef){
+           foreach $i (@$row) {
+                $start=1 if( $i=~/radiation/ );
+           }
+   }
+   
+   if( $start ){ 
+      return(1) ;  # New scheme
+   }else{
+      return(0);   # Old scheme
+   }   
+}
+
+#
+# Change DB-Scheme to ne one
+#
+sub alterSchemeRadUv{
+   my($dbh)=shift;
+   my($i, $sql, @sql, $numRows, $numRows1, $sth, $resRef, $type, $id);
+   
+   
+   #
+   # Rename inside table
+   #
+   $sql="ALTER TABLE light ADD radiation float DEFAULT 0.0, ADD uvindex float DEFAULT 0.0";
+   print "Running \"$sql\" ...\n";
+   $numRows=$dbh->do($sql);
+   if(!defined($numRows)){
+      warn "* Error adding fields to table light\n" 
+   }else{
+      print "+ OK, added radiation and uvindex columns to table light.\n";
+   }
+   $i=0;
+   $sql[$i++]="ALTER TABLE th_sensors DROP INDEX dataindex; ";
+   $sql[$i++]="ALTER TABLE th_sensors  ADD INDEX dataindex (datetime,sensid, stationid); "; 
+   $sql[$i++]= "ALTER TABLE pressure DROP INDEX dataindex; ";
+   $sql[$i++]= "ALTER TABLE pressure  ADD INDEX dataindex (datetime,sensid, stationid);";
+   $sql[$i++]= "ALTER TABLE rain DROP INDEX dataindex;";
+   $sql[$i++]= "ALTER TABLE rain  ADD INDEX dataindex (datetime,sensid, stationid);";
+   $sql[$i++]= "ALTER TABLE light DROP INDEX dataindex;";
+   $sql[$i++]= "ALTER TABLE light  ADD INDEX dataindex (datetime,sensid, stationid);";
+   $sql[$i++]= "ALTER TABLE wind DROP INDEX dataindex;";
+   $sql[$i++]= "ALTER TABLE wind  ADD INDEX dataindex (datetime,sensid, stationid);";
+   for($i=0; $i<=$#sql; $i++){
+      $numRows=$dbh->do($sql[$i]);
+   }
+   print "Updated index files of tables. \n";
+
+   undef $numRows;   
+}
+
+
+#---- evapotranspiration --------------------------------------------------------------------------------------------------------------
+#
+# check if database already has new scheme
+#
+sub checkNewSchemeEvapotransp{
+   my($dbh)=shift;
+   my($sth, $resRef, $start, $row);
+
+   $sth=$dbh->prepare("describe rain");
+   $sth->execute;
+   $resRef=$sth->fetchall_arrayref();
+
+   # Check if database has already new format
+   $start=0;
+   foreach $row (@$resRef){
+           foreach $i (@$row) {
+                $start=1 if( $i=~/evapotransp/ );
+           }
+   }
+   
+   if( $start ){ 
+      return(1) ;  # New scheme
+   }else{
+      return(0);   # Old scheme
+   }   
+}
+
+#
+# Change DB-Scheme to ne one
+#
+sub alterSchemeEvapotransp{
+   my($dbh)=shift;
+   my($i, $sql, @sql, $numRows, $numRows1, $sth, $resRef, $type, $id);
+   
+   
+   #
+   # Rename inside table
+   #
+   $sql="ALTER TABLE rain ADD evapotransp SMALLINT(4) UNSIGNED";
+   print "Running \"$sql\" ...\n";
+   $numRows=$dbh->do($sql);
+   if(!defined($numRows)){
+      warn "* Error adding fields to table rain\n" 
+   }else{
+      print "+ OK, added evapotransp columns to table rain.\n";
+   }
+   undef $numRows;   
+}
+
+
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+#
+# Check if we can connect to mysql-Server
+#
+sub testMysqlConnection{
+   my($dbh)=shift;
+   my($sth, @row);
+   
+   if( !$dbh ){
+   	warn "No valid database handle. Stop.\n";
+	warn "Please verify the access data (MYSQL username and password) \n",
+	     "in the head of this script (Variables: \$dbUser and \$dbPasswd\n",
+	     "as well as the name of the database server (\$dbServer) \n",
+	     "and then try again \n";
+	exit 1;
+   }
+   	
+   @row=$dbh->selectrow_array("SHOW STATUS");
+
+   if( $#row >=0 ){
+	warn "Connection to database \"$database\" as user \"$dbUser\" is OK\n";
+   }else{
+        closeDb($dbh);
+   	warn "Connection FAILED\n";
+	warn "Please verify the access data (MYSQL username and password) \n",
+	     "in the head of this script (Variables: \$dbUser and \$dbPasswd\n",
+	     "as well as the name of the database server (\$dbServer) \n",
+	     "and then try again \n";
+   	exit 1;
+   }	
+}
+
+
+#-----------------------------------------------------------------------------
+# main
+#-----------------------------------------------------------------------------
+
+$dbh=connectDb();
+
+warn "\nThis script will update the ws2500 wetter-database to a new format\n",
+     "keeping all data making the needed conversions. Bevor anything is\n",
+     "changed, a backup of the existing database is made into the\n",
+     "current directory. \n",
+     "Bevor continuing be sure that you have set the MYSQl user and\n",
+     "password variables in the head of the script else all operations\n",
+     "will fail. (Press ENTER to continue)\n";
+$x=<stdin>;     
+    
+
+testMysqlConnection($dbh);
+
+$backupDone=0;
+if( ! checkNewSchemeGust($dbh) ){
+   runBackup() if( !$backupDone );
+   $backupDone=1;
+   alterSchemeGust($dbh);
+}else{
+   warn "No changes needed for table wind. Database has needed gustspeed and gustangle cols.\n";
+}
+
+if( ! checkNewSchemeRadUv($dbh) ){
+   runBackup() if( !$backupDone );
+   $backupDone=1;
+   alterSchemeRadUv($dbh);
+}else{
+   warn "No changes needed for table light. Database has needed radiation and uvindex cols.\n";
+}
+if( ! checkNewSchemeEvapotransp($dbh) ){
+   runBackup() if( !$backupDone );
+   $backupDone=1;
+   alterSchemeEvapotransp($dbh);
+}else{
+   warn "No changes needed for table rain. Database has needed evapotransp col.\n";
+}
+
+closeDb($dbh);

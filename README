@@ -1,0 +1,703 @@
+Copyright
+=========
+
+ws2500 is written by Rainer Krienke and is distributed under the
+GNU General Public License.
+
+CHANGES:
+=======
+Please see CHANGES file for important upgrade information.
+
+If you are upgrading from an older to a newer version you should 
+carefully read the CHANGES file. There were some major changes in some 
+version which require that you update your database. The excact steps you
+have to perform are described in the CHANGES file for the version you
+want to install. If you upgrade from a very old version to a current one
+you might have to do this in several steps to get all changes of the
+database. Major changes happened in the following versions:
+
+version 0.96
+version 0.70
+version 0.51
+
+So eg if you upgrade from version 0.65 to 0.96 you have first to 
+upgrade to 0.70 and do what the CHANGES file tells you for version 0.70
+and next you can upgrade to 0.96. Again you have to follow the
+instructions in the CHANGES file for version 0.96.
+
+Author and warranty
+==================-
+
+Rainer Krienke, krienke@uni-koblenz.de
+
+The author does not provide any warranty nor responsibility  for whatever might
+happen by using this program. If you run it things happen since YOU pressed the
+ENTER key. So if your dog starts barking at you or stops eating and looks sick
+after you started the program, don't blame me ....
+
+At this place I want to thank those people who helped improving ws2500
+either by contributing fixes or new code or by donating good ideas or
+even both.  Thanks very much to:
+
+- Thomas Dreßler
+- Willem Eradus
+- Michael Gerber
+- Dietmar Tallroth
+
+
+(If one of these co authors want to see their email addresses here, please
+tell me).
+
+
+Wat can it do?
+=============
+
+With this program you can handle a ws2500 or ws2500PC weather station from ELV.
+The software consists of a (C-) program named ws2500 that can be used to read
+data from a ws2500 station, print out the stations status etc and it can be used
+to set station specific parameters.
+
+Besides the program there are several important scripts:
+
+- scripts (getws2500data, ws2500tomysql) to automatically insert data read from 
+  the station by the ws2500 program into a MYSQL database.
+- a script (wetter.cgi) to display the data stored in the MYSQL database 
+  graphically in a webbrowser.  
+- a script (ws2500toawekas) that lets you participate in the AWEKAS project, 
+  a network of private weather stations (for more infos 
+  about AWEKAS see: http://www.awekas.at).
+  
+
+The ws2500 program itself does not provide any data presentation functionality except
+for presenting the raw figures. The rest of the work is done by the perl and Unix
+Shell scripts just mentioned. These scripts are described in more detail below.  The
+Scripts are located in the "scripts" subdirectory.
+
+A demo for the graphical display capabilities can be seen at:
+
+http://www.uni-koblenz.de/~krienke/wetter/wetter.cgi
+
+This is a live demo of the wetter.cgi script. See the READMES in the scripts
+subdirectory in the source tar ball for more information on this.
+
+
+The database
+============
+Usually you probably do not only want to read the data from the ws2500
+station but you also want to store and visualize the data. By using the
+scripts described above all data can be stored in a MYSQL database.
+Actually the database can store data from several weather stations. 
+Each station can described by a station-id, a number. The first
+station has number 1. For a ws2500 station and this software 
+you configure this number in the .ws2500.conf file. But provided you
+have the software to read data from other weather station you could also
+store those data in the same database by simply using a still unused
+station-id. All the data could be visialized by the wetter.cgi-script.
+The databse scheme used is described in the wetterdbScheme.txt file.
+
+
+Version
+=======
+
+see output of: ws2500 -v
+
+Tested on SuSE 8.2 and newer Linux systems. It should be no problem to get the
+set of programms running on other unix-based systems. I received feedback, that its
+working on BSD and MacOs X Systems as well.
+
+
+Installation
+============
+
+Installing the software is not a hard job. There is a "runinstall"
+script you can call from within the source directory. So change
+directory into the ws2500 directory and the call ./runinstall. This will
+guide you through the initial setup for the software. However it will
+not install the MYSQL server for you. If not already done, install it
+and start it before starting the script.
+
+If you just want to change the attributes of your weatherstation(s) and
+its sensors stored in the database you can call the runinstall script
+using option -s. In this case you will be guided through a  number of
+questions that ask you data like name, model, location of your weather
+station. The data given by you is then stored in the database in the
+tables sensor_desc and station_descr.
+
+
+Another way of installing the software is manually. Here are some
+guidelines: Unpack the tar archive
+somewhere, change directory into the ws2500-directory and then call
+make to compile the program on your system. You need at least a working
+gcc and the make-program on your system. Usually these programs do exist
+already.
+
+When the program has been compiled and linked without errors, you can copy
+the executable (ws2500) anywhere you like. Don't forget: If you copy the
+program to a none standard path, that is not part of your PATH environment
+variable, you have to start the program with its full path e.g:
+/mypath/programs/ws2500
+
+Besides the program itself you probably want install and configure the
+scripts  that can be found in the scripts subdirectory. These scripts allow
+you to automate  the data extraction process and to automatically insert the
+data retrieved from the ws2500(PC) station into a MYSQL database. Another
+script allows you to  graphically display the data from the MYSQL database in
+the web. There are the following important scripts:
+
+getws2500data: This script will extract data from you weather station  (using
+	ws2500) and  insert it into the database using ws2500tomysql. It
+	takes care of error handling etc. You might want  to call this script
+	by cron regularly to extract your data eg all 10 minutes.
+
+ws2500tomysql: This script can insert data read from your station with ws2500
+	into a  MYSQl database on a DB server. It can also create the weather
+	database on the MYSQl server. It is used by the getws2500data script.
+
+wetter.cgi: This script will graphically display your weather data in the
+	web. wetter.cgi is  a CGI script that needs to be run on a web server
+	like apache. It will extract data from your MYSQl weather database
+	and display these data graphically. Its also  allows you to analyze
+	your data in many ways.
+
+All scripts need a configuration. More about this is said in the READMEs of
+each script in  the scripts subdirectory.
+
+
+Supported harware
+=================
+At the moment the program should support the following weather stations:
+
+	- WS2500 	(firmware versions 1.0 & 3.1)
+	- WS2500 PC	(firmware versions 3.1)
+
+Other hardware has not been tesed.
+
+
+Using it
+========
+
+Basics:
+-------
+
+Allthough ws2500 knows about a lot of options (see: ws2500 -h), using it is
+basically very simple. For an initial test you might want to read out the DCF
+time as well as  the stations status information. This could be done by:
+
+$ ws2500 -d
+DCF OK   : YES
+Weekday  : sunday
+Time     : 13:53:06
+Day      : 23
+Month    : 02
+Year     : 2003
+Unix date: 022313532003.06
+
+If your station is connected to a non default serial port simply use option -p.
+(Default port is /dev/ttyS1). If your station was connected to the third
+serial port (com3) you would have to type:
+
+$ ws2500 -d -p /dev/ttyS2
+DCF OK   : YES
+Weekday  : sunday
+Time     : 13:53:06
+Day      : 23
+Month    : 02
+Year     : 2003
+Unix date: 022313532003.06
+
+Note that in Linux the third serial port (com3 in Windows) is /dev/ttyS2
+whereas the first port (com1 in Windows) is /dev/ttyS0.
+
+
+Getting weatherstations status:
+-------------------------------
+
+To read the status of the station and the sensors do:
+$ ws2500 -s
+Sensor address information:
+        Address of inside sensor:      7
+        Address of rain sensor:        7
+        Address of wind sensor:        7
+        Address of light sensor:       7
+
+Sensor status information of WS2500 station:
+        Status of temperature sensors:
+                Sensor 0: is OK
+                Sensor 1: not available
+                Sensor 2: not available
+                Sensor 3: not available
+                Sensor 4: not available
+                Sensor 5: not available
+                Sensor 6: not available
+                Sensor 7: not available
+        Status of rain sensor:        had 1 drop outs
+        Status of wind sensor:        is OK
+        Status of pyranometer sensor: not available
+        Status of inside sensor:      not available
+
+General Information:
+        Interval time:    2
+        Version Number:   3.1
+        WS2500 language:  English
+        Dcf availavility: Yes
+        Dcf is in sync:   Yes
+        Protocol version: 1.2
+        WS2500 type:      WS2500 PC
+
+
+Extracting data:
+----------------
+
+Next you should try to read real sensor data from the station. You can do this
+in different ways using on of the following options:
+
+	- Option -n: Read only new data
+	- Option -x: Read all data entries from the first up to the last
+	- Option -g: Read first of unread data sets
+	- Option -f: Read the first data set stored in the station
+
+For a first test you should try -g. The main difference of all these options
+is that -f and -x reset the stations internal pointer to the current data
+set. So afterwards all data is considered new and option -n will show all
+data. Option -n only shows "New" data sets, that have been stored inside the
+weather station after data have been read out for the last time using -n. So
+using -n shows new data moving the internal pointer to the last current
+dataset.  Option -g finally reads the first new available data set without
+moving the internal pointer forward. If you read Data using -n and then try
+-g you won't receive any data, since at the moment there is no unread data
+waiting to be read. In this case you have to wait some time until the station
+writes a new data record.
+
+So getting data for testing is a easy as:
+
+$ ws2500 -g
+
+If no data shows up all new available data has already been read. In this
+case you might try ws2500 -f or ws2500 -x  or wait a while
+for new data to arrive and then try ws2500 -n again.
+
+The output format should be clear by itself. Actually there are two
+formats you can choose in between. The default (long) format ist thought
+to be good readable for humans. However if you want to postprocess the
+data read from the ws2500 station you can also use the terse format by 
+using option -t .  This format is the short version and it has a header
+that explains all formats of data to follow, so that it can be oparsed
+automatically. 
+
+In both output formats there is a "New"-flag which can either be "0"  or
+"1" or "h". The value "0" means that the data you see is actually a copy
+of the last data read from this sensor. This copy was performed by the 
+weather station and not by ws2500!  This means that the sensor had a
+drop out.  The value "1" says, that the data printed is ok. For a
+humidity sensor there is the additional value 'h' which means that the
+humidity value of this sensor was below the minimal value of 20% 
+that can be measured by this sensor (it might
+also mean, that it was above 100% or that there was an error measuring
+humiditi but all this is very very rarely so we  ignore it). In
+this case the humidity is set to 20% and the New flag is neither '0' nor '1'
+but 'h' to indicate a failure of the humidity sensor. Beside the 'h'
+value for the new flag an additional warning is printed on stderr to
+describe the problem.
+Strating with version 0.99 another value: "d" for ok is allowed for the first
+row of the light table. This value "d" symbolises to the script 
+updateLightTable, that an older version of this table has been updated
+to the current version. In this current version the value sunDuration
+describes the time in min the sun has be shining in the last measuring period
+of the station and not (like before) the total sunshine time from the
+very beginning of the stations activation. This value is only used for
+the updateLightTable script and has no other relevance.
+
+
+Things you should *NOT* do:
+---------------------------
+
+The ws2500(PC) weather station automatically performes a resync with the DCF signal. 
+This is first done, when the station is switched on (battaries inserted). This
+takes up to 5 minutes. Next the station searches for sensors. If you interrupt the
+station in this initial setup by calling ws2500, the station will abort the DCF syncing
+so your clock might be wrong (ws2500 -s will tell you). If your station does not
+sync with DCF or does not show sensors, then turn it off and then on again and then wait 
+about 10 minutes before you run ws2500 for the first time.
+
+Each night at 03:00am  the station does again a resync with the DCF signal. Again if you
+run ws2500 at this time or close to it (03:00-03:05) the station will interrupt the i
+DCF sync and your stations DCF clock in the ws2500 -s output will show 
+"DCF in sync: No". The only solution is not to run the program at this time!
+
+
+DATE and TIME stuff
+-------------------
+
+The first versions of ws2500 stored all data with a timestamp that was given in
+local time (the time on your wall clock). It turned out, that this is basically
+a bad idea and so it changed from version 0.7 on. The problem is DST (daylight
+saving time) or short summertime, where the local time is changed. For example
+in germany at the end of march the clock is turned at 02:00 in the night one
+hour forward to 03:00. In the end of october the clock is then turned back from
+03:00 to 02:00.  This is of course a problem with weather observation, since
+when summertime starts there are no data for the time of 02:00->03:00, simply
+because this hour never existed. The next problem is that at the end of summer
+time all values are doubled, since the time from 02:00->03:00 exists twice (but
+probably with different temperatures etc). 
+
+Another more subtle problem is that  during summertime all values are a little
+wrong, since they are taken to early: Think of temperature at say 07:00 in the
+morning. In normal (non summer) time you will have a certain value for a
+outside sensor in the end of march, say 7°C. Now when summertime starts a day
+later and you look at the value of the same sensor at 07:00 (summertime) then
+you will probably find a lower value, say 6°C simply because you are looking at
+the sensor one hour earlier than the day before because summertime started. In
+all your graphics you would see this litte jump and this should not be. 
+
+So this is really bad. The solution is to store all data not in local time in
+the database but to convert the local time to GMT. In GMT (Greenwich Mean Time)
+there is no DST and by converting the local time to GMT there are no "holes" in
+time and all the problems are gone.
+
+So ws2500 from version 0.7 on stores all data in GMT in the database. So
+calling ws2500 [-t] -g or -n or -x will show data sets with dates that are in
+GMT. The date and time you get when calling it with -d or -u is however  always
+in local time since its only purpose is to set the computers clock.
+
+All this will only work correctly if your linux system has the correct
+time zone configured. In germany this is eg "Europe/Berlin". Usually
+there are precompiled timezone files. You should find them in
+/usr/share/zoneinfo. This directory contain subdirectories like "Europe"
+in which you find the zone files like "Berlin". Simply copy this file to
+/etc/localtime. This should be it. A better way is of course to use the
+setuptool of your linux distribution that might do the job for you.
+
+
+
+DCF-leap year Problem 
+---------------------- 
+
+The ws2500 station has an internal
+DCF clock. If this clock reports that the DCF-time is OK the ws2500 program
+will use it for the date,time data for the sensor data (eg temperature) to be
+extracted. However there is a problem due to the way  ws2500 handles the DCF
+clock: 
+
+The ws2500 station does only a DCF synchronisation when switched on or at 03:00
+in the night. The rest of the time it simply uses the builtin clock without any
+reference to the DCF signal. The clock increments time and date but does not
+take leap years into account. This is problematic since in a leap year it will
+lead to sensor data having a wrong date. This happens on Feb 28  when there is
+a *leap year* at midnight. From Feb 28 midnight to Feb 29 02:59 the DCF clock
+will show the wrong date: Mar 01. At exactly 03:00 the ws2500 clock will resync
+with the DCF signal and correct its date back to Feb 29. This means that data
+read from the ws2500 station in the time from Feb 28 midnight to Feb 29 02:59
+would be labled to be from Mar 01. 
+
+To avoid this problem, the ws2500  program sets the stations internal DCF 
+status to "not usable" during the period of 3h described above. By this trick 
+instead of the internal ws2500 stations clock the ws2500 program will now use the
+linux system time for the extracted data. So these data will have the correct
+date, if the linux system clock is allright. 
+So in the time from Feb 28 midnight to Feb 29 02:59 (or Mar 01 02:59), ws2500 
+will issues a warning
+
+"DCF OK" set to "No" due to possible leap year problem.
+
+to indicate this situation and use the linux system time instead. Since ws2500
+does not check if there really is a leap year the warning will be printed  each
+year in the time period from above.
+
+
+Date checks
+-----------
+
+The ws2500 makes a check on the timestamps the ws2500 station writes
+into the datasets. Actually the ws2500 station simply puts a counter
+there that tells how many minutes from "now" the current data set was
+measured. So the program has to calculate the real date value from the
+system time and the counter. If the DCF clock of the station is OK the
+program will use the DCF time else it will use the linux system clock
+for getting the current time/date. 
+
+Personally I had exactly one time the problem, that the DCF clock was OK
+but for an unknown reason the extrated data in the time from 00:00 to
+02:59 AM was delivered with a date that was one *year* back. Everything else
+was OK.  At that time there was no date check in the software it simply
+relied on the fact that the data from the station should be correct. 
+The result was,
+that all the datasets from 00:00 to 02:59 on that one day were inserted
+into the database with a wrong date value, a wrong year :-(  
+The problem went away after the station had resynced at 03:00 AM with the DCF
+signal. Please note: The station claimed that also before 03:00 the DCF
+clock was "in sync", i.e. corrrect.
+
+To find such invalid date entries, I implemented a date check into the
+ws2500 program. It now checks if the date that is calculated for the
+current ws2500 data set is not more than 60 days away from the current
+linux system clock. Why 60 days? Well the station can store 1024 data
+sets. The maximal interval at which the station can store data sets is
+63 minutes. Now if you calculate 1024*63min this is about 45 days i.e. the
+oldest data set in a ws2500 station can be at most 45 days old. For
+safety reasons (avoid mistedection) I simply added some more days.
+
+If the program reads a data set from the station that is more than 60
+days away from the current linux system time it will issue a error
+message and abort. The error looks like this:
+
+*** Error: Too big time offset in data.
+* There was a huge time offset (3600 days) from  the current linux system time
+* to the time of the ws2500 data set read from the station. Please check the
+* time of your linux system. The current value is printed below. If you simply
+* choose to ignore this time offset in the future, call the program with
+* option "-i" on your own risk of getting data with wrong timestamps!
+* If your system clock is ok it might also help to have the ws2500 station
+* resync with the DCF signal which is automatically done at 03:00am.
+*
+* Some more information about the problem (time values are in local
+* time):
+* Current linux system time:          Fri Jan  7 08:52:12 2005
+* DCF time (is OK):                   Fri Jan  7 08:52:12 2005
+* Date/time for w2500 data set:       Wed Mar  1 08:51:12 1995
+* Timeoffset in dataset relativ to "now" (sec): 311040060 (in days:3600)
+* Additional time error caused by reading many datasets (sec): 0
+* Exit due to error!
+
+If you see such an error first check if your linux system clock is
+correct, then see if the DCF clock is allright. If both are OK, but you
+still get this error you have the situation I originally had when I
+started implementing this check. For me it simply helped to wait until 
+03:00 AM when the station does its resync with DCF. You can also turn
+the station off and on again, but doing so you will not only force a
+resync with DCF but also loose all the data stored in the stations
+memory. So better wait until 03:00 AM.
+
+* Since this check is always done by comparing the date of the dataset with
+* the current linux system time, it is important that you set you system
+* clock correctly!
+
+If you don't care about this time difference detection you can call
+ws2500 with option -i (= ignore). Using this option will turn the time
+check off, so ws2500 will issue a warning but will continue the read out
+data from the ws2500 station no matter what timestamps the datasets
+have. You should know however, that doing so will yield data that could
+have wrong time/date entries. Using -i might make sense if your system
+clock is not set correctly and you have for whatever reason no way to
+correct it.  Usually -i should not be needed.
+
+
+Using the tolerance check feature
+---------------------------------
+
+Due to the nature of the data transmission from sensor to station by radio it
+happens, that values are simply wrong. Sometimes you will see a value eg for
+humidity that increased more than 100% compared to the last. To detect such 
+errors ws2500 offers a simple tolerance check feature when called with  -n or
+-x together with -C inline, -C config, -C <filename> like ws2500 -n -C
+/tmp/lastvaluefile.txt. The rain sensor is a little special case, see below
+for the answer why.
+
+The mechanism is really simple. When ws2500 reads a new value from a sensor
+it compares this value with the last value of this sensor. If the difference
+of both values (taken absolutely) is larger than a user defined tolerance
+value the new sensor value is considered wrong. Instead of printing the new
+"wrong" value ws2500 will then print the older value. If several such errors
+occur in sequence you can define a max_error value that when reached disables
+the sensor, so no data from it will be printed until it sends reasonable
+values again. max_error may be null, so the sensor will never be disabled.
+
+However sometimes you might have defined your tolerance interval to narrow.
+Think of a sunny day with little humidity and then a thunder-storm starts
+with a lot of rain, which will lead to a sudden increase of humidity, that
+might be larger than the interval you defined as tolerance. This would lead
+to the situation, that the new correct value is not used but the old much
+lower value. Since the humidity would not go down very soon in such a
+situation the tolerance check would continue to throw away the new high
+values of which ws2500 would assume they are errors until finally the sensor
+would be disabled. To solve this problem, I introduced a third column for
+each tolerance variable, that defines a delta value for the sensor value. If
+a tolerance check applies, than the "last value" that is used as a reference
+for the next tolerance check will be moved towards the current value by the
+defined delta value. In the next check the current (here: high) value will be
+compared with the last value that was (here:) increased by the delta value.
+So now the difference of both is smaller. If the tolerance check applies
+again, then the "last value" is again incremented (or decremented) by delta
+for  the next check. At most max_error corrections will be made. From the
+sensors point of view the value in this thunderstorm scenario is slowly
+incrementing and hopefully will reach the real value again or at least the
+tolerance range of the sensor. In  a real error scenario it is assumed that
+only one or two values are wrong (bigger or smaller). So adding a delta value
+is not a problem here.  The delta value has to be >= 0 and at most half the
+size of the tolerance  value itself. If delta is 0 no increment/decrement of
+the "last value" is done.
+
+To compare a current value with the last one there always has to be a last
+value. ws2500 offeres 2 choices to solve this problem. When you call ws2500
+with -C inline it will use the very first value of each sensor to be the 
+reference value for the second. When the second is OK it will serve as
+reference for the third etc. The problem is, that the very first value might
+already be wrong. To solve this problem ws2500 can be called with -C config
+or -C <filename>. In this case ws2500 takes a file to store the last values
+read using -n. So in the next call of ws2500 it will remember the last values
+read by reading this file again and so has the ability to detect even if the
+first value delivered is bad. The difference between -C <file> and -C config
+is simply that -C <file> allows you to specify the name and path of the last
+value file directly on the commandline, whereas -C config will try to find
+this filename in the config file of ws2500.
+
+Tolerance values have to be defined in the ws2500 configuration file. See
+the  demo file (dot.ws2500.conf) that is part of this distribution for
+details.
+
+When such a tolerance error is detected, ws2500 will write appropriate 
+messages to stderr, so you can see what happened when.
+
+
+The rain sensor: 
+---------------- 
+
+The rain sensor is after all just a say
+11bit counter that increases if there is rain. The counter is multiplied with
+value that describes how much rain had to fall to increase the counter in the
+rain sensor. The result is a absolute amount of rain ususally measured in mm
+or l/m*m. The problem with this is, that this counter will eventually
+overflow and start with zero again. This is of course a problem with the
+tolerance check for the rain sensor.  Another problem with this sensor is,
+that especially during thunder-storms its very likely that the counter
+changes its value in a random fashion. 
+
+So it makes no sense to correct the counter value, instead of this we take a
+look at the difference of two counter values. If the difference is < 0 or >
+the defined tolerance value then we set this difference to zero (no rain). 
+Because of this method the delta value (3. col of tol definition)  for the
+rain sensor is NOT used, it would make no sense to drive the counter value in
+any direction.  The method of  checking the difference makes the tol check
+quite unrelated to any nonesense the counter might go through.  As soon as
+there are two counter values that are "close" to each other there will be a
+valid difference that is used as a value for the current rainfall. If you
+work with a database and ws2500tomysql (default) then this check is performed
+in ws2500 and in ws2500tomysql because on one hand a user without a database
+should also have the comfort of tolerance checks and on the other hand
+ws2500tomysql has ALWAYS access to the last rain counter value for
+calculating the difference value (ws2500 might not have the last counter
+value depending on its operation mode).  Even if this check is actually
+performed twice (when using ws2500tomysql) this is not a problem.  If ws2500
+and ws2500tomysql disagree about the amount of rain, ws2500tomysql will
+prevail, since it is assumed that the last rain counter value on which the
+calculation is based from the database is more valid than the counter value
+given from  ws2500.
+
+ws2500 has a default for the amount of rain with each counter strike in
+the sensor of 0.340mm. So 2 counterstikes result in 0.68 mm rain beeing
+measured. You can change this default in the .ws2500.config file by
+setting the variable mmRainByCount to the new value in mm. 
+
+
+Programming your station
+========================
+
+You can program several parameters into your station. Usually this is the
+interval time at which sensor data are stored in the stations memory as well
+as addresses of sensors. Not all versions of the stations allow the same data
+to be programmed. Moreover a station with version 1.0 does not allow to
+extract the sensor addresses of eg rain and wind senors. On the other hand
+the command provided by ELV to program a value like the interval time always
+inculdes programming sensor addresses as well. So to program you have to
+specify sensor address allthough you do not want to change them. Since you
+cannot extract the currently set values the only choice is to let the user
+specify all needed values  (This looks like: ./ws2500 -I 5 -V 0 -L 7 -R 7 -W
+7 -P 7) . This is only true for version 1.0 not for 3.1. The program will
+complain and advise you to use the appropriate options when you try to
+program a value on a 1.0 system. 
+
+The programming feature has only been tested with a WS2500 PC firmware
+V3.1. It will probably fail on a WS2500 panel version.
+
+
+Configuration file
+==================
+
+To make life easier you can put some configuration variables (like serial
+port) into a configuration file. See the demo file dot.ws2500.conf in the 
+distribution. The real filename has to be .ws2500.conf or ws2500.conf
+depending on where you put the config file. ws2500 and all other scripts
+allways search in the following sequence for a configuration file:
+
+1. in the local directory of the application
+2. in the HOME directory of the user running the program/script
+3. in /etc/ws2500/
+
+When the file searched for is found at any place in this sequence the
+search stopps. For 1. and 2. the configuration file must have a leading
+"." (eg .ws2500.conf, or .getws2500data.conf). Configuration files in
+/etc/ws2500/ do *not* have a leading dot. So eg the program ws2500 will
+look for a configuration file named /etc/ws2500/ws2500.conf, *not* for
+/etc/ws2500/.ws2500.conf.
+
+For the ws2500-configuration file the user has another option. He can
+call the ws2500 program using the option -C <pathName> where <pathName>
+is the complete path and name of the configuration file to be used.
+So ws2500 -C /tmp/my.conf will try to read
+configuration data from the file /tmp/my.conf . When -C is used the default
+configuration in the current directory and the users HOME directory and
+in /etc/ws2500/ is not used.
+
+The sameple ws2500 configuration file included in
+the distribution was named dot.ws2500.conf to avoid using this file without
+wanting to. 
+
+If you want to see which config file is used when running ws2500, call
+the application with -D, eg ws2500 -D -s and watch for the first lines
+of output.  
+
+
+Exit status of program
+----------------------
+The program will deliver different exit ($? in shell) stati depending on what
+happened:
+
+0:  Normal termination
+1:  An unspecified error
+2:  Error xferring command to station
+3:  Error decoding data received from station
+4:  Error wainting for data (timeout)
+5:  Error trimming data received from station
+6:  Error setting interface parameters
+7:  Error setting stations internal data pointer to next data record
+8:  Not a real error. Value indicates that tolerance check has been
+    applied to at least one sensor value.
+9:  Not a real Error: Indicated that at least one  sensor had to many drop outs. The 
+    threshhold for this error to occur can be set in the config file using
+    the variable MaxDropOutCount.
+50: The DCF clock is not in sync. This error only occurs when reading the DCF time
+    from the station using option -d and tells you better not to use the time you 
+    received.
+
+In case there are several errors at once the one with the highest priority (smallest
+numeric value, except for 0) is returned. So if for example error 8 and error 4 occured
+in one run of ws2500 the return status will be 4. 
+
+
+Doing more....
+==============
+
+When the program itself is running allright, you may want to install the
+graphical web-diplay for your data. For this purpose there is a
+wetter.cgi-script. You will need a MYSQL-database server to store the
+data inside. If you have this you can use ws2500tomysql to set up the
+weather database and then you can use getws2500data to regularly extract 
+data from your weather station and have it inserted into the database.
+The script wetter.cgi then extracts data from the databse and displays
+it graphically using HTML. 
+Please READ the READMEs in the scripts subdirectory for further
+information.
+
+
+Comments, Bugs, Patches
+=======================
+
+You are welcome to find bugs and provide patches or report bugs in this
+program. If you find a bug please mail to krienke@uni-koblenz.de describing
+what harware (stations hardware) you use and what exactly happend. A comment
+often seen like "I does not work" is not really helpful :-) . If you already
+have patched the bug please attach  a diff file to your mail, so I can
+integrate your patch in my current version.
+
+Have lot of fun and thanks
+Rainer Krienke
+06/2003

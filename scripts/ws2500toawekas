@@ -1,0 +1,469 @@
+#!/usr/bin/perl
+
+#
+# Script to generate the data file needed by the AWEKAS project.
+# See: http://wetter.kremstalnet.at/awekas/index.htm
+# It needs the ws2500 MYSQL database and will create output in
+# *WSWIN texfile format* that is suitable for awekas
+#
+# Configuration:
+#---------------
+# You need to supply the database relevant parameters below as well
+# as the sensor ids to be used. Usually you only have to 
+# modify the sensor id of the outdoor sensors which sould be used
+# to provide the outdoor temperatur and humidity to awekas.
+# The script will exit with status != 0 if any error occured else 0 
+# You can write all config values in a file in your HOME directory with
+# the name that is written in $confFile below. You can even share the
+# .ws2500tomysql configfile with this one. Just add the awekas*SensId
+# variables to the .ws2500tomysql.conf file and set $confFile in this 
+# script accordingly.
+# The configfile is always searched in the HOME directory of the user
+# who is running this script
+#
+# !!! Please take care that your system clock is correct in date and time !!!!!
+#
+# Data output format:
+#
+# Variante 1: (WSWIN) Textdatei 
+# 
+#  1. Zeile) Leerzeile 
+#  2. Zeile) Aussentemperatur
+#  3. Zeile) Aussenfeuchte
+#  4. Zeile) Luftdruck 
+#  5. Zeile) Tagesniederschlagsmenge 
+#  6. Zeile) Windgeschwindigkeit (in km/h) 
+#  7. Zeile) Windrichtung (in Grad) 
+#  8. Zeile) Zeit der Erzeugung (HH:MM) 
+#  9. Zeile) Datum der Erzeugung (wenn geht Format TT.MM.JJJJ) 
+# 10. Zeile) Aenderung des Luftdruckes in den letzen 6 Stunden
+#
+# Version & Author:
+#------------------
+# R. Krienke, 04/2004, 05/2006, 04/2008
+# krienke@uni-koblenz.de
+# $version='$Revision: 1.4 $';
+
+require DBI;
+use Date::Calc qw(:all);
+
+$confFile="ws2500toawekas.conf"; 
+$driver="mysql";
+$sysDbName="mysql";
+$dbadmin="root";
+$dbServer="sqlhost";
+$database="wetterdb";
+$dbUser="user";
+$dbPassword="password";
+$defaultPort="3306";
+$debug=0;       # Global debug flag
+$|=10;          # Flush output on stdout after <n> chars
+
+#
+# The sensor ids to be used for data delivery to awekas
+$awekasStationId=1;		# Id of weather station to use data from
+$awekasThSensId=1;		# sensid used to get outdoor temp and humidity
+$awekasPresSensId=1;		# sensid used to get the air pressure
+$awekasWindSensId=1;		# sensid used to get wind speed and angle
+$awekasRainSensId=1;		# sensid used to get rain that fell today
+
+# --- End of configuration section # ----------------------------------------
+
+
+#
+# Connect to database
+#
+sub connectDb{
+   my($dsn, $dbh);
+
+   # Connect to database
+   #
+   $dsn = "DBI:$driver:database=$database;host=$dbServer;port=$defaultPort";
+   if( ! ($dbh = DBI->connect($dsn, $dbUser, $dbPassword,
+        {'RaiseError' => 1, 'AutoCommit' => 1, 'PrintError' => 1, 'mysql_ssl' => 1 })) ) {
+       $errMsg="Cannot Connect to \"$dsn\" as $dbUser\n";
+       return(0);
+   }
+   return($dbh);
+}
+
+
+#
+# Close connection to database
+#
+sub closeDb{
+  my($dbh)=@_;
+
+  $dbh->disconnect();
+}
+
+
+#
+# Run a sql statement and check result
+#
+sub runSqlCommand{
+   my($dbh, $sql)=@_;
+   my($refResult);
+   
+   $refResult=$dbh->selectrow_hashref($sql);
+   
+   warn "+++ No results running sql query: \"$sql\" \n" if( !defined($refResult) );
+   
+   return($refResult);
+}
+
+
+# convert a local time and date to a date in GMT. This routine needs the 
+# glocal variable $theTimeOffset which describes how many hours the difference
+# between local and GMT time is. 
+# The variable target can be LOC or GMT giving the destination time zone
+sub timeConvert{
+   my($date, $time, $target)=@_;
+   my(@d, $nd, $offset);
+   
+   if( !$timeIsGMT ){
+	   @d=(split(/-/o, $date), split(/:/o, $time) );
+	   if( $target eq "GMT" ){
+   		@nd=Gmtime(Mktime($d[0], $d[1], $d[2], $d[3], $d[4], $d[5]));
+	   }else{
+   		@nd=Localtime(Date_to_Time($d[0], $d[1], $d[2], $d[3], $d[4], $d[5]));
+	   }
+	   $nd[1]="0$nd[1]" if($nd[1] <10); 
+	   $nd[2]="0$nd[2]" if($nd[2] <10); 
+	   $nd[3]="0$nd[3]" if($nd[3] <10); 
+	   $nd[4]="0$nd[4]" if($nd[4] <10); 
+	   $nd[5]="0$nd[5]" if($nd[5] <10); 
+	   return(("$nd[0]-$nd[1]-$nd[2]",  "$nd[3]:$nd[4]:$nd[5]"));			
+   }else{
+   	return(($date, $time));
+   }	   
+}
+
+
+#
+# Find closest match of data set in table to given date and extract
+# given colums. This function may be called to extract a value at a 
+# certain past time, or it may be called to extract the sum of EXACTLY
+# ONE value since a past time up to now. This is needed for the
+# rain sensor to calculate eg the rain that fell in the last 48h
+# In this case as said @cols may contain exactly ONE colum name!
+# The function return 0 on failure else 1.
+#
+sub findRowDateMatch{
+   my($date, 		# Reference date (eg: now()) in: y,mo,d,h,mi,s
+      $hoffset,		# Offset in hours
+      $moffset,		# Offset in minutes
+      $refResults,	# reference to array with results
+      $table,		# Name of table
+      $stationId,	# Id of weather station
+      $sensId,		# The sensors id
+      $sum,		# Return Sum of col vals (for rain) or single value
+      @cols)=@_;	# database colums to get
+
+   my($i, $j, $sql, $result1Ref, $result2Ref, $id, $offset);
+   my(@date1, @date2, @rDate, $rTime, $refResult, $dateRef);
+   my($dateStr,$year, $month,$day, $h, $m, $s, $cols, $tmp1, $tmp2); 
+   
+   $offset=($hoffset*60)+$moffset;
+   # Contruct reference date in textual form like in mysql db: 
+   # "2004-01-18 08:59:00"
+   ($year, $month,$day, $h, $m, $s)=split(/\s*,\s*/, $date);
+   $dateStr=sprintf("%04d-%02d-%02d %02d:%02d:%02d", $year, $month, 
+                                                    $day, $h, $m, $s);
+   $cols=join(",", @cols);
+   $cols=~s/datetime,//;  # Will be added below
+   $sql="SELECT id,datetime, $cols FROM $table ";
+   $sql.="WHERE ${table}.stationid=$stationId AND ${table}.sensid=$sensId AND ${table}.datetime >= " . 
+         "\"$dateStr\" - INTERVAL $offset MINUTE " .
+	 "ORDER by datetime ASC LIMIT 1";
+	 
+   #print "Date: $date <br>\n";
+   #print "*** $sql <br>\n";
+   # Get Dataset that mysq finds close to the given date
+   $result1Ref=$dbh->selectrow_hashref($sql);
+   
+   # There was no matching row, so we simply fetch the latest existing one
+   if( !defined($result1Ref) ){ 
+   	$sql="SELECT id,datetime, $cols FROM $table ";
+	$sql.="WHERE ${table}.stationid=$stationId AND ${table}.sensid=$sensId ORDER by datetime desc LIMIT 1";
+        #print "**+ $sql <br>\n";
+	$result1Ref=$dbh->selectrow_hashref($sql);
+	return(0) if( !defined($result1Ref) );
+   }
+   # Convert Date and time field of row found into array suitable for Date:Calc
+   ($tmp1,$tmp2)=split(/\s/o, $result1Ref->{"datetime"});
+   @date1=( split(/-/o,$tmp1), split(/:/o, $tmp2) );
+   
+   # Now get the row that comes right before the one retrieved above
+   # Its id col must be at least 1 smaller with the same sensor id value.
+   $id=$result1Ref->{"id"};
+   $sql="SELECT id,datetime,$cols FROM $table ";
+   $sql.="WHERE ${table}.stationid=$stationId AND ${table}.sensid=$sensId AND ${table}.id < $id ORDER BY id desc LIMIT 1";
+   #print "*** $sql <br>\n";
+
+   $result2Ref=$dbh->selectrow_hashref($sql);
+   return(0) if( !defined($result2Ref) );	 
+   ($tmp1,$tmp2)=split(/\s/, $result2Ref->{"datetime"});
+   @date2=( split(/-/o, $tmp1), split(/:/o, $tmp2) );
+   
+   # Now find out which of both dates is closer to the reference date
+   # First subtract given number of hours from reference date   
+   @rDate=Add_Delta_DHMS($year, $month,$day, $h, $m, $s, 0, 0, -1*$offset, 0);
+   $rTime=Date_to_Time(@rDate);
+   
+   #print "+ @date1;; @date2 <br>\n";
+   # For the rain table we may never lock back past now-offset, so skip the
+   # comparison of the two dates in this case and use the first one
+   if( $table !~ /rain/io ){   
+      if( abs($rTime-Date_to_Time(@date1)) >
+          abs($rTime-Date_to_Time(@date2))
+        ){
+        $refResult=$result2Ref;
+        $dateRef=\@date2;
+      }else{
+        $refResult=$result1Ref;
+        $dateRef=\@date1;
+      }
+   }else{
+        $refResult=$result1Ref;
+        $dateRef=\@date1;      
+   }
+    
+   # print "dateNow: $date; RefDate: @rDate; Row_date: @$dateRef; Offset: $offset <br>\n";
+   # If the offset (eg now-20min) is less then 20min for a T7H-value 
+   # we allow an error of 75% of the offset for the date in a row found and the
+   # date wanted (now-offset==$rTime).
+   if( $table =~ /th/io && $offset <= 30 ){ 
+      if( abs($rTime-Date_to_Time(@{$dateRef})) >  int(0.75*$offset*60) ){
+           return(0);
+      }
+   # In case we are looking for rain values we allow only rows that are closer
+   # to "now" than the given offset time. So rows with a date older than 
+   # now -offset are rejected because this would lead to wrong values for 
+   # rainsum values. 
+   }elsif( $table =~/rain/io ) {
+      $tmp1=$rTime-Date_to_Time(@{$dateRef});
+      #print "* (now-offset)...rowdate found (min, h): ", $tmp1/60, ", h: ", $tmp1/60/60, " <br>\n";
+      if( $tmp1 > 0 ){
+           #print ":$table, returned<br>\n";
+	   return(0);
+      }    
+   # For all other situations the error between the referenztime wanted and the
+   # and the row found we allow an error of no more than 30min.   
+   }else{
+      if( abs($rTime-Date_to_Time(@{$dateRef})) >  30*60 ){
+           return(0);
+      }
+   }   
+
+   # Debug:
+   #print $refResult->{"date"} ." " . $refResult->{"time"} . "\n";
+
+   # if sums were requested we need to sum up all values from the row found 
+   # ($resultRef) up to now
+   if( $sum ){
+     return(0) if( $#cols >=1 );
+     $j="SUM(" . $cols[$#cols] . ")"; 
+     $cols[$#cols]="$j";
+     $sql="SELECT $j FROM $table ";
+     $sql.="WHERE ${table}.stationid=$stationId AND ${table}.id >= " . $refResult->{"id"} . " AND ";
+     $sql.="${table}.sensid=$sensId AND ${table}.datetime <= " .
+           "\"$dateStr\"";
+     # Get Dataset that mysq finds close to the given date
+     $refResult=$dbh->selectrow_hashref($sql);
+     #print "-> $sql <br>\n";
+     return(0) if( !defined($refResult) );
+   }
+
+   
+   # Enter Results of row that was closest to given time
+   for($i=0; $i<=$#cols; $i++){
+   	$refResults->[$i]=$refResult->{$cols[$i]};
+	# Debug:
+	#print "$cols[$i]: $refResult->{$cols[$i]} \n";
+   }
+   return(1); # OK
+}
+
+
+
+# ------ main -----------------------------------
+#
+# Try to open config file and read variables inside it
+# First check if there is an environment variable WS2500TOAWEKASCONF
+# then check $HOME/.ws2500toawekas.conf and then try /etc/ws2500/ws2500toawekas.conf
+#
+if( defined($ENV{"WS2500TOAWEKASCONF"}) ){
+    if( -r $ENV{"WS2500TOAWEKASCONF"} ){
+       $configFile=$ENV{"WS2500TOAWEKASCONF"};
+    }else{
+       warn "Environment variable WS2500TOAWEKASCONF but file is not readable. Skipped.\n";
+    }
+}else{
+   $configFile="";
+   $home=$ENV{"HOME"};
+
+   if( -r "$home/.$confFile" ){
+   	   $configFile="$home/.$confFile";
+   }elsif( -r "/etc/ws2500/$confFile" ){
+   	   $configFile="/etc/ws2500/$confFile";
+   }
+}
+if( length($configFile) ){
+   $cmd="";
+   open( FD, "$configFile" )|| warn "Cannot read $configFile. Ignored\n";
+
+   while( <FD> ){
+        $cmd.=$_;
+        if( length($cmd) > 100000 ){
+           $cmd="";
+           die "Too many commands in config file (>100000bytes. Aborting.\n";
+        }
+   }
+   eval $cmd;
+   $cmd="";
+   close(FD);
+}
+
+# get current date in GMT
+@now=Today_and_Now(1);
+@nowLoc=Today_and_Now(0);
+
+# Get date like "2008-04-23" for current date and time
+$dateTodayGmt=sprintf("%02d-%02d-%02d", $now[0], $now[1], $now[2]);
+
+# Open DB
+$dbh=connectDb();
+
+
+# Get T,H value for outside sensor
+$sql="SELECT datetime,T,H FROM th_sensors WHERE stationid=$awekasStationId AND sensid='$awekasThSensId' AND LEFT(datetime,10)='$dateTodayGmt' ORDER by datetime DESC limit 1";
+$ref_TH=runSqlCommand($dbh, $sql);
+
+# Check if there was a valid result
+die "*** Cannot determine date from awekas TH-sensor (id: $awekasThSensId, StatioId: $awekasStationId). Exit." 
+                         if( !defined ($ref_TH->{"datetime"}) );
+
+
+##print $ref_TH->{"date"}, $ref_TH->{"time"}, "\n";
+
+# convert date and time from DB entry into format suitable for 
+# comparison with current date.
+($tmp1,$tmp2)=split(/\s/o, $ref_TH->{"datetime"});
+@latest=(split(/-/o, $tmp1), split(/:/o, $tmp2) );
+
+# Check if data are not too old (6 hours are still accepted here)
+$secNow=Date_to_Time(@now);
+$secLatest=Date_to_Time(@latest);
+##print "Now:$secNow, Latest: $secLatest\n";
+if( $secNow - $secLatest > (6* 3600) ){ # 6 hours
+	warn "Latest data from ", $ref_TH->{"date"}, " ", $ref_TH->{"time"},
+	     " are older than 6 hours from now.\nThis is to old for awekas. Stopping. \n";
+	exit(1);     
+}
+
+# Get Pressure value for inside sensor
+$sql="SELECT datetime,P FROM pressure WHERE stationid=$awekasStationId AND sensid='$awekasPresSensId' AND LEFT(datetime,10)='$dateTodayGmt' ORDER by datetime DESC limit 1";
+$ref_P=runSqlCommand($dbh, $sql);
+
+# Get Rain summary for today
+$midnightDate="$nowLoc[0]-$nowLoc[1]-$nowLoc[2]";  # date of day for which to calculate sum
+$midnightTime="00:00:00";              # starting from midnight
+$dayEndTime="23:59:59";		       # Day end time
+#
+# Since the database stores dates in GMT we have to calculate what GMT time 
+# corresponds to the local time "midnight" 
+($midnightDateGMT, $midnightTimeGMT)=timeConvert($midnightDate, $midnightTime, "GMT");
+# Now calculate what GMT time corresponds to local time "end of day"
+($midnightDate, $dayEndTime)=timeConvert($midnightDate, $dayEndTime, "GMT");
+
+# Now select data that is between midnight(GMT) and end of day(GMT)
+$sql="SELECT SUM(diff)/1000 AS \"SUM\" FROM rain WHERE stationid=$awekasStationId AND datetime>=\"$midnightDateGMT $midnightTimeGMT\" AND" .
+ " LEFT(datetime,10) <=\"$midnightDate $dayEndTime\" AND sensid='$awekasRainSensId'";
+
+#$sql="SELECT datetime,SUM(diff)/1000 AS \"SUM\" FROM rain WHERE stationid=$awekasStationId AND sensid='$awekasRainSensId' AND LEFT(datetime,10)='$dateTodayGmt' GROUP BY LEFT(datetime,10)";
+$ref_R=runSqlCommand($dbh, $sql);
+
+# Get windspeed and direction 
+$sql="SELECT datetime, speed, angle FROM wind WHERE stationid=$awekasStationId AND sensid='$awekasWindSensId' AND LEFT(datetime,10)='$dateTodayGmt' ORDER by datetime DESC limit 1";
+$ref_W=runSqlCommand($dbh, $sql);
+
+
+# Get Pressure 6 hours ago
+@cols=("datetime","P");
+$ret=findRowDateMatch( join(",", @now), 	# Reference time: now()
+                       "6", 0, 		# time offset in h and min
+		       \@res, 			# results
+		       "pressure", 		# Tablename
+		       $awekasStationId,
+		       $awekasPresSensId,	# Sensor id
+                       0, 			# Don't build sums (eg. for rain)
+		       @cols); # Columns to get
+if( $ret ){
+  ($tmp1,$tmp2)=split(/\s/o, $res[0]);
+   $ref_P_6->{"date"}=$tmp1;
+   $ref_P_6->{"time"}=$tmp2;
+   $ref_P_6->{"P"}=$res[1];
+   $pDiff=$ref_P->{"P"} - $ref_P_6->{"P"}
+}else{
+   $pDiff="0";
+}
+
+closeDb($dbh);
+
+#
+# check if there are valid values and if not substitute them by "0"
+if( ! defined($ref_TH->{"T"}) ){
+	warn "+++ No T-value found. Set to 0";
+	$ref_TH->{"T"}=0;
+}
+if( ! defined($ref_TH->{"H"}) ){
+	warn "+++ No H-value found. Set to 0";
+	$ref_TH->{"H"}=0;
+}
+if( ! defined($ref_P->{"P"}) ){
+	warn "+++ No pressure value found. Set to 0";
+	$ref_P->{"P"}=0;
+}
+if( ! defined($ref_R->{"SUM"}) ){
+	$ref_R->{"SUM"}="0,0000";
+}
+if( ! defined($ref_W->{"speed"}) ){
+	warn "+++ No windspeed value found. Set to 0";
+	$ref_W->{"speed"}=0;
+}
+if( ! defined($ref_W->{"angle"}) ){
+	warn "+++ No winddirection value found. Set to 0";
+	$ref_W->{"angle"}=0;
+}
+
+#
+# Print the results of the local jury ....
+#
+$res="\n";
+$res.=$ref_TH->{"T"} . "\n";
+$res.=$ref_TH->{"H"} . "\n";
+$res.=$ref_P->{"P"} . "\n";
+$res.=$ref_R->{"SUM"} . "\n";
+$res.=$ref_W->{"speed"} . "\n";
+$res.=$ref_W->{"angle"} . "\n";
+
+# Replace decimal point by "," by all values so far
+$res=~s/\./,/go;
+
+# Convert date and time into local time
+($tmp1, $tmp2)=timeConvert(split(/\s/o, $ref_TH->{"datetime"}, 2), "LOC");
+@date=split(/-/, $tmp1);
+@time=split(/:/, $tmp2);
+
+$res.="$time[0]:$time[1]" . "\n";
+$res.="$date[2].$date[1].$date[0]" ."\n";
+$res.=$pDiff . "\n";
+
+$cr=pack("c", 0x0d);
+$lf=pack("c", 0x0a);
+
+# Convert output to DOS format
+$res=~s/\n/$cr$lf/go;
+
+print $res;

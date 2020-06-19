@@ -1,0 +1,26 @@
+#!/bin/sh
+
+#
+# Make backup from "wetter" database
+#
+
+BACKUPDIR="/home/krienke/lib/wetter"
+FILE="wetter.backup.sql"
+DATABASE="wetter"
+DBUSER="mysqluser"
+DBPASSWD="password"
+SQLSERVER="sqlhost"
+
+
+if [ -r "$BACKUPDIR/${FILE}.old.gz" ]; then
+	mv "$BACKUPDIR/${FILE}.old.gz" "$BACKUPDIR/${FILE}.older.gz"
+fi	
+if [ -r "$BACKUPDIR/${FILE}.gz" ]; then
+	mv "$BACKUPDIR/${FILE}.gz" "$BACKUPDIR/${FILE}.old.gz"
+fi	
+mysqldump --opt  -c $DATABASE -u $DBUSER  -h $SQLSERVER -p$DBPASSWD > $BACKUPDIR/$FILE
+gzip $BACKUPDIR/$FILE
+
+if [ $? != "0" ]; then
+	echo "wetter-db backup run was not successful"
+fi

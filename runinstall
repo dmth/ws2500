@@ -1,0 +1,717 @@
+#!/bin/bash
+
+# Installer script
+# R. Krienke, 01/2004
+#
+#$Id: runinstall,v 0.1 2004/01/22 12:09:33 krienke Exp $
+
+SCRIPTS="scripts" # Subdir with scripts inside
+MYSQLADMIN="mysqladmin"
+
+#
+# Find a program by searching several paths for it
+# First parameter is name of program. Result is echoed to stdout 
+# which is the path to the binary if it was found, else empty.
+#
+findBin() {
+   # Path to search for binary
+   PATHS="/usr/bin:/usr/sbin:/bin:/sbin:/usr/local/bin:.$PATH"
+
+   OLDIFS="$IFS"
+   IFS="${IFS}:"
+   for i in $PATHS; do
+   	if [ -x "$i/$1" ]; then
+		echo "$i"
+		return 1
+	fi	
+   done
+   IFS="$OLDIFS"
+   return 0
+}
+
+
+#
+# Try to find some tools needed for wetter management
+#
+findTools() {
+   PROGRAM="$MYSQLADMIN";P=`findBin $PROGRAM`
+   if [ -z "$P" ]; then
+   	echo "Cannot find \"$PROGRAM\". Please install."
+   else
+   	case "$PROGRAM" in 
+		"$MYSQLADMIN")	MYSQLADMIN="$PROGRAM";;
+	esac	
+   fi	
+
+
+   # Look for ws2500.c and Makefile
+   if [ ! -r "ws2500.c" -o ! -r "Makefile" ]; then
+   	echo "Cannot find ws2500.c file or Makefile. Please change into"
+	echo "the source directory of ws2500 and call this script again"	
+	echo
+	exit 1
+   fi
+
+   if [ ! -r "dot.ws2500.conf" ]; then
+   	echo "Cannot find demo ws2500 config file \"dot.ws2500.conf\""
+	echo "It is contained in the source distribution. It has to be "
+	echo "in the same directory like the runinstall script."
+	echo
+	exit 1
+   fi	
+
+	
+}
+
+
+# Definition der Funktion yesno:
+yesno() {
+	while true; do
+		echo "$1" 		# Eingabeaufforderung fuer Benutzer
+		read YNANSWER		# Antwort des Benutzers abwarten
+		case $YNANSWER in
+		[jJ]|[yY])
+			#echo "Ihre Antwort war (Ja/Yes)"
+			return 1
+			;;
+		[nN])
+			#echo "Ihre Antwort war (Nein/No)"
+			return 0
+			;;
+		*)	
+			echo "Bitte antworten Sie nur mit Ja,Yes/Nein,No";;
+		esac
+	done
+}
+
+# Let the user specify a input path
+# $1 is a basepath that is prepended to the user specified path
+readPath() {
+   B="$1"
+   while true; do
+	read ANSWER		# Antwort des Benutzers abwarten
+	if [ -z "$ANSWER" ]; then
+	  if ! yesno "Do you want to abort the installation ? "; then
+	  	echo "Abort. Installation is not complete"
+		exit 1
+	  fi	
+	fi
+
+	if [ ! -d "$B/$ANSWER" ]; then
+	   if yesno "Path \"$B/$ANSWER\" does not exist. Shall I create it ?"; then
+	   	echo "Please specify another path"
+		echo
+	   else
+	   	echo "Creating \"$B/$ANSWER\""
+		mkdir -p "$B/$ANSWER"
+		if [ $? != 0 ]; then
+			echo "mkdir failed. Please check why. Script will stop now."
+			echo "Installation is nor complete!"
+			echo
+			exit 1
+		fi	
+		RET="$ANSWER"
+		return 0;
+	   fi	
+	else
+	   RET="$ANSWER"
+	   return 0;
+		
+        fi	   
+   done	   
+}
+
+
+#
+# Read a nonempty value from stdin
+#
+readValue() {
+   while true; do
+	read ANSWER		# Antwort des Benutzers abwarten
+	if [  -z "$ANSWER" ]; then
+	  	echo "You have to supply a value! Try again..."
+		echo
+	else
+		RET="$ANSWER"
+		return 0
+	fi	
+   done	
+}
+
+
+# Read a password
+readPassword() {
+	while true; do
+	   echo "Your input will be invisible:"
+	   stty -echo
+	   readValue 
+	   ANSWERP="$RET"
+	   stty echo
+
+	   echo 
+	   echo "Enter password again..."
+	   stty -echo
+	   readValue
+	   ANSWERP2="$RET"
+	   stty echo
+
+	   if [ "$ANSWERP" = "$ANSWERP2" ]; then
+	   	break
+	   else
+		echo
+	   	echo "Passwords are different. Try again."
+	   fi
+	done   
+	RET="$ANSWERP"
+	echo "OK"
+}
+
+#
+# request several data from user. The questions are in $1, $2, ....
+# The answers will be stored in $RET_1, $RET_2, ....
+# The user can correct his input
+#
+requestData() {   
+   while true; do
+           c=0
+   	   for i; do
+	      c=`expr $c + 1 `
+	      echo 
+	      echo $i
+	      if [ `expr match "$i" ".*[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*"` -gt 0 ]; then
+	      	 readPassword
+	      else	 
+	         readValue
+              fi 
+	      eval RET_$c="\"$RET\""
+	   done
+	   
+	   echo
+
+   	   echo
+   	   echo "----- Summary: --------------------"
+   	   c=0
+	   for  i; do
+	      c=`expr $c + 1 `
+	      echo $i
+	      if [ `expr match  "$i" ".*[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd].*"` -gt 0 ]; then
+	         echo "********"
+	      else
+	         eval echo "\"   -> \""  \$RET_$c
+	      fi 
+	   done
+	   
+   	   echo
+	   if ! yesno "Are these values ok (y/n) ?"; then
+   		   break
+   	   else
+   		   echo "---------------------------------------------------------------"
+   	   fi
+   done
+}
+
+
+#
+# get data about MYSQL-Server 
+#
+getMysqlData () {
+   requestData	"Enter the name of your MYSQL-Server:" \
+                "Enter the password of the MYSQL Administrator:" \
+                "Enter the name of the account to insert/read data into/from the database:" \
+                "Enter the the password to be used for this account:" \
+                "Enter the the name of the database (usually: wetter):" 
+
+   MYSQLHOST="$RET_1"
+   DBADMINPW="$RET_2"
+   DBUSER="$RET_3"
+   DBPASSWD="$RET_4"
+   DBNAME="$RET_5"
+}
+
+
+
+#------------------------------------------------------------------------------
+# main
+#------------------------------------------------------------------------------
+
+if [ "$1" != "-s" ]; then
+   shift
+   # Check if the programs needed are installed
+   findTools
+
+   cat <<EOF
+
+   This script is NOT thought for people who have already a running
+   ws2500 (and script) configuration and simply want to upgrade. This
+   script will create the needed configuration files and thus possibly
+   overwrite older versions without asking! The script will however ask 
+   you if you want to create a new database. If you have an existing database
+   with data in it you should of course say \"no\" when asked if
+   a new database should be created. 
+   However even then the existing config files would be overwritten. You can 
+   move your existing config files to /etc/ws2500/ (removing the leading \".\"
+   at the start of each filename (.ws2500.conf -> /etc/ws2500/ws2500.conf) 
+   so that they are safe.
+
+   So the script is designed mostly for the BEGINNER who wants to set
+   up his INITIAL configuration.
+EOF
+
+   if yesno "Continue configuration (y/n)? "; then
+   	   echo "Exit"
+   	   exit 1
+   fi
+
+
+   # ----- Ask if user is correct
+   USER=`id -un`
+   cat <<EOF
+
+   This script was started as user "$USER". The script will install all
+   binaries or configuration files needed in the users HOME directory
+   $HOME   or
+   subdirectories. You will be asked later to specify where to put what.
+   All ws2500 programs and scripts will be run with this user id.
+   However if you want the ws2500 stuff to be installed in another users
+   HOME directory and run by another user please exit this script now and log
+   in as the user you like unpack the source again (so the new user has
+   write access in the source directory) and then start this script again.
+   It is assumed that you have your MYSQL server up and running already. If
+   not, install it and start the server now before proceeding.
+
+EOF
+
+   if yesno "Continue configuration with user \"$USER\" (y/n)? "; then
+   	   echo "Exit"
+   	   exit 1
+   fi
+
+   # This directory is used as a base for all further file references
+   BASEDIR="$HOME"
+
+
+   # ------ Compile
+   echo
+   echo "Trying to compile ws2500 for you"
+   make clean > /dev/null 2>&1
+   make > make.out 2>&1
+   if [ $? != 0 ]; then
+   	   cat <<EOF
+   make reported errors during the compilation of the source. Take a look
+   at the output in the file make.out and try to fix the problems.
+   Exit
+EOF
+
+   	   exit 1
+   else
+   	   rm -f make.out
+   fi
+   echo "Make seems to be Ok"
+
+   # ------ Ask for installation directories
+   echo
+
+   cat <<EOF
+   Now we have to determine where to put the binaries and where to put the
+   temporary weather data file.
+
+   The binaries are ws2500 as well as the scripts ws2500tomysql and
+   getws2500data. ws2500 is needed to extract data from the station.
+   ws2500tomysql will read the output of ws2500 (the weather data) and
+   insert these data into the MYSQL database. getws2500data is a script
+   that is thought to be run automatically, eg by cron. It extracts data
+   from the weatherstation using ws2500 and then calls ws2500tomysql to
+   insert the data read into the MYSQL database. It reports erros by mail.
+
+   You now have to specify a path where the ws2500 binary and the scripts
+   will be copied. For your own comfort you later should add this directory
+   to yout PATH environment variable, so the binaries are found
+   automatically when you type in the programs name.
+   A good choice is for example:
+   $BASEDIR/bin
+
+   Please enter the path relative to $BASEDIR you like to use for binaries:
+EOF
+
+
+   readPath $BASEDIR
+   BINDIR="$RET"
+
+   echo "Ok. Copying binaries to $BASEDIR/$BINDIR"
+
+   cp ws2500 $BASEDIR/$BINDIR &&
+   cp $SCRIPTS/ws2500tomysql $BASEDIR/$BINDIR &&
+   cp $SCRIPTS/getws2500data $BASEDIR/$BINDIR
+
+   if [ $? = 0 ]; then
+   	   echo "Ok"
+   else
+   	   echo "Error copying binaries to $BASEDIR/$BINDIR. Abort."
+   	   exit 1
+   fi
+
+
+   # --------- Database configuration/initialisation
+   echo "---------------------------------------------------------------"
+   cat <<EOF
+   Next you should take care that your MYSQL server is up and running.
+   You will need the root password for the MYSQL Administrator (may not be
+   empty). If you did not set a password for the database admin this script
+   will do this for you. You have to supply the password below. If you
+   have already set one nothing will be changed, but you have to supply it
+   below anyway to access the database.
+   You also need the name (or ip-address) of your MYSQl server. If
+   the database is running on the local machine, this is simply: localhost
+   Because weather data are  not inserted by "root" into the database
+   but by a regular user you will be asked to supply the name of such a
+   user who will "own" the database as well a password. This user will be 
+   created in the MYSQL database system. You may choose any name here since 
+   the MYSQL user management is independent from the unix user management but 
+   it makes sense to use your unix account name ($USER). The password you 
+   supply for this user should be different from your unix password!!!
+
+EOF
+   # Ask user for MYSQl access data
+   getMysqlData
+
+   echo
+   echo "Ok."
+   W2500TOMYSQLCONF="$BASEDIR/.ws2500tomysql.conf"
+   echo "Creating ws2500tomysql config file $W2500TOMYSQLCONF"
+
+   cat <<EOF >$W2500TOMYSQLCONF
+   \$dbServer="$MYSQLHOST";
+   \$database="$DBNAME";
+   \$dbUser="$DBUSER";
+   \$dbPassword="$DBPASSWD";
+   \$dbadmin="root";
+   \$dbadminPw="$DBADMINPW";
+EOF
+
+   if ! yesno "Setup MYSQl server and create database, deleting existing weather data (y/n) ? "; then
+      echo
+      echo "Now I try to setup the database ....."
+      echo "Testing if MYSQl server is alive and if root access works ..."
+
+      # Change ping by status , 01/2009
+      $MYSQLADMIN -u root -h "$MYSQLHOST" status > /dev/null 2>&1
+      if [ $? = "0" ]; then
+   	      echo "Database administrator has no password. Setting the user specified"
+   	      $MYSQLADMIN -u root -h "$MYSQLHOST" password "$DBADMINPW"
+   	      if [ $? != "0" ]; then
+   		      echo "Password could not be set. Stop."
+   		      exit 1
+   	      else
+   		      echo "New DBadmin password set successfully."
+   	      fi
+      fi
+
+      $MYSQLADMIN -u root -p"$DBADMINPW" -h "$MYSQLHOST" status > /dev/null
+
+      if [ $? != "0" ]; then
+   	      cat <<EOF
+
+      Access to MYSQL server "$MYSQLHOST" with user root was not successful.
+      Please check that your server is running, the password you gave above
+      for the MYSQl admin user is correct and check if this works and then
+      restart this script. You can check if your data are correct by running
+      "mysqladmin" in a command shell. The complete commandline is:
+      $MYSQLADMIN -u root -p"$DBADMINPW" -h "$MYSQLHOST" ping
+      If this command has a return Status == 0 access is OK. Keep the
+      parameters you found (password, server name) in mind and restart this
+      script.
+EOF
+   	      exit 1
+      else
+   	      echo
+   	      echo "Access to MYSQl server is OK"
+      fi
+
+ 
+      echo
+      echo "I can now create the database and all its tables. Existing tables"
+      echo "would be deleted if you continue. If you do not already have a weather station"
+      echo "and a database running you should continue. But if you have a database"
+      echo "containing weather data you should definitively skip the following step"
+      echo "else all your \"old\"  weather data would be lost."
+      echo "So continue if this is your first weather station. Skip if you want to"
+      echo "set up a second one into the same (existing) database."
+      echo
+      echo
+      echo "Now Creating the database \"$DBNAME\" on server $MYSQLHOST"
+      echo "using the ws2500tomysql utility...."
+      $BASEDIR/$BINDIR/ws2500tomysql -c -d "$DBNAME"
+
+      if [ $? != 0 ]; then
+   	      echo "Database Creation was not successful. Stop."
+   	      exit 1
+      else
+   	      echo "Run was successfull"
+      fi
+   fi
+  
+  
+
+   # ----------------------------------------------------------------------
+   echo
+   echo "-----------------------------------------------------"
+   cat <<EOF
+   Weather data can be extracted automatically from the station and be
+   inserted into the MYSQL database. This is done by getws2500data.
+   Because the MYSQL server might reside on the other side of the world,
+   data that have been extracted are written to a file before we try to
+   insert them into the database. If the database should not be available
+   for a while the data stay in the file and so nothing is lost.
+   Next you need to say where to place this file and you have to say
+   to whom getws2500data should send mail if any error occurs.
+
+   All paths you give will be relative to:
+   $BASEDIR
+
+EOF
+
+   while true; do
+   	   echo "Enter the base directory for the data file and log file"
+   	   echo "relative to $BASEDIR:"
+   	   readPath $BASEDIR
+   	   STOREDIR="$RET"
+   	   echo
+
+
+   	   echo "Enter a mail addres where errors should be send to"
+   	   readValue
+   	   ADMINMAIL="$RET"
+   	   echo
+
+
+   	   cat <<EOF
+   Enter the serial port your station is connected to (eg.  /dev/ttyS0)
+   If you do not know which port it is connected to you can try it
+   out. This script will call ws2500 to see if any output can be
+   received from the station via the serial port you specify.
+   You can skip this step for now by entering nothing but you wont
+   be able to extract data then and have to correct the settings
+   manually in the file $BASEDIR/.getws2500data.conf
+
+EOF
+   	   while true; do
+   	      echo "Please enter the complete path to your serial port where the"
+   	      echo "ws2500(PC) station is connected to:"
+   	      read ANSWER
+   	      if [ -z "$ANSWER" ]; then
+   		   # break
+   		   echo "If you want you can stop the search here and enter"
+   		   echo "the correct path later manually"
+   		   if ! yesno "Stop (y/n)? "; then
+   			   echo "Please remember to set the serial port to your needs!!!"
+   			   SERIAL="serial_port_not_set"
+   			   sleep 3
+   			   break
+   			   SERIAL=""
+   		   fi
+ 
+ 
+   	      fi
+   	      echo "Call: $BASEDIR/$BINDIR/ws2500 -p $ANSWER -s"
+   	      $BASEDIR/$BINDIR/ws2500 -p "$ANSWER" -s > /dev/null 2>&1
+   	      if [ $? != 0 ]; then
+   		   echo "Connection was not successful. Try another serial port."
+   		   echo
+   	      else
+   		   echo "Success"
+   		   echo
+   		   SERIAL="$ANSWER"
+   		   break
+   	      fi
+   	   done
+
+
+   	   echo
+   	   echo "----- Summary: --------------------"
+   	   echo "Datafile directory:	   $STOREDIR"
+   	   echo "Admin mail address:	   $ADMINMAIL"
+   	   echo "Ws2500 serial port:	   $SERIAL"
+   	   echo
+
+   	   if ! yesno "Are these values ok (y/n) ? "; then
+   		   break
+   	   else
+   		   echo "---------------------------------------------------------------"
+   	   fi
+   done
+
+   echo
+   echo "Ok."
+   GETWS2500CONF="$BASEDIR/.getws2500data.conf"
+   echo "Creating getws2500data config file $GETWS2500CONF"
+
+   cat <<EOF >$GETWS2500CONF
+   WS2500="$BASEDIR/$BINDIR/ws2500"
+   WS2500TOMYSQL="$BASEDIR/$BINDIR/ws2500tomysql"
+
+   DATAPATH="$BASEDIR/$STOREDIR"
+   DATANAME="wetterdata.txt"
+   DATAFILE="\$DATAPATH/\$DATANAME"
+   LASTDATAFILE="\$DATAPATH/lastValues.txt"
+   SERIALPORT="$SERIAL"
+
+   # Use tolerance check feature:
+   WS2500PARAM=" -n -t -p \$SERIALPORT -C \$LASTDATAFILE"
+
+   ERRFLAG="\$DATAPATH/dbInsertErr"
+   LOGFILE="\$DATAPATH/ws2500.log"
+   ADMIN="$ADMINMAIL"
+EOF
+
+
+   # -----------------------------------------------------------------------
+   echo "-----------------------------------------------------------------"
+   echo
+   echo "Now please enter the altitude in meters of your stations location"
+   echo "This is needed to calculate the correct rel air pressure"
+   readValue
+   ALTITUDE="$RET"
+
+   cat <<EOF
+   The MYSQL wetter database usually used in conjunction with the ws2500
+   program can store data of multiple weather stations. Each station has
+   an integer id used to distinguish the different weather stations from
+   each other. The first station usually has id 1, the second 2, ....
+   Please set the correct id for this station:
+EOF
+   readValue
+   STATIONID="$RET"
+   
+
+   echo
+   echo "Now copying the .ws2500.conf file for the ws2500 binary to
+   echo "$BASEDIR. You should definitely take a look at this file and edit
+   echo "it according to your needs, eg to configure tolerance checks"
+
+   cat dot.ws2500.conf|sed -e "s/^.*Altitude=.*$/Altitude=$ALTITUDE/" \
+                      -e "s/^.*Stationid=.*$/Stationid=$STATIONID/" >$BASEDIR/.ws2500.conf
+
+   echo "Done"
+
+   echo
+   echo "The configuration files have been created. You now can run "
+   echo "$BASEDIR/$BINDIR/getws2500data to extract data from the "
+   echo "station and insert them into the MYSQl database. You can also "
+   echo "enter a call of this script into your crontab so it will be called"
+   echo "automatically eg. each 30 minutes.  "
+   echo "If you call it manually call it as  "getws2500data -v" to see output, else all"
+   echo "output will only be written to the log file."
+   echo
+
+
+   echo "What is still left to to is the configuration of your webserver and"
+   echo "of the wetter.cgi script itself. See README of the script for this"
+   echo  "---------------------------------------------------------------"
+fi
+
+# Setting up the sensor tables
+echo "Now you can enter information about the weather station and its sensors."
+echo "You can name them and enter other data, that will be stored in the database."
+echo "Programs like wetter.cgi will display this data later."
+echo
+
+
+if [ -z "$STATIONID" ]; then
+   echo "Please enter the station id (1,2, ...) you want to enter information for:"
+   readValue
+   STATIONID="$RET"
+fi
+if [ -z "$MYSQLHOST" ]; then
+   echo
+   echo "Please enter the MYSQL access data for the wetter database:"
+   # Ask user for MYSQl access data
+   getMysqlData
+fi
+echo
+
+while true; do
+      echo "Please enter information about weather station (id: $STATIONID)"
+      echo "You will be asked for: the stations name, a description, its model "
+      echo "and manufacturer and its location."
+      
+      requestData "Please enter the stations name?"             \
+                  "Please enter the stations manufacturer?"     \
+                  "Please enter the stations model?"            \
+		  "Please enter a description for the station?" \
+	          "Please enter the stations location?"
+      
+      SNAME="$RET_1"
+      SMANUFACT="$RET_2"
+      SMODEL="$RET_3"
+      SDESCR="$RET_4"
+      SLOC="$RET_5"
+
+      echo "DELETE FROM station_descr WHERE stationid='$STATIONID'"|
+	     mysql -h $MYSQLHOST -u $DBUSER -p$DBPASSWD $DBNAME  
+
+      SQL="INSERT INTO station_descr (stationid, name, descr, manufacturer, model, location) "
+      SQL="$SQL VALUES ('$STATIONID', '$SNAME', '$SDESCR', '$SMANUFACT', '$SMODEL', '$SLOC')"      
+      echo "$SQL" | mysql -h $MYSQLHOST -u $DBUSER -p$DBPASSWD $DBNAME 
+      if [ $? != 0 ]; then
+          echo "Error running: \"$sql\""
+      fi	        
+
+      echo
+      echo "Now please enter Information about the sensors of this weather station:"      
+      echo "You need to know at least which sensors you have and which temperatur"
+      echo "humidity sensors have what sensor id given by the weather station"
+      echo "if unsure a call of ws2500 -s or ws2500 -g may help...." 
+      while true; do
+	  echo "Please enter information about temp/humidity sensor."	  
+	  requestData "Id of T/H-sensor (1-8=external, 17=inside)" \
+	              "Name of this sensor?" 
+
+	  echo "DELETE FROM sensor_descr WHERE stationid='$STATIONID' AND type='TH' AND sensid='$RET_1'"|
+	     mysql -h $MYSQLHOST -u $DBUSER -p$DBPASSWD $DBNAME  
+	  
+	  SQL="INSERT INTO sensor_descr (stationid,sensid,type,name) "
+	  SQL="$SQL VALUES ('$STATIONID','$RET_1','th','$RET_2')"
+
+	  echo "$SQL" | mysql -h $MYSQLHOST -u $DBUSER -p$DBPASSWD $DBNAME
+	  if [ $? != 0 ]; then
+	       echo "Error running: \"$SQL\""
+	  fi
+ 	  
+	  echo
+	  if  yesno "Do you want to enter data for another senor (y/n) ? "; then
+ 	  	  break
+ 	  fi
+      done 
+      
+      #
+      # Enter information for the other sensors 
+      #
+      for i in wind rain light pressure; do
+    	  echo "-----------------------------------------------------------------"
+    	  echo
+    	  echo "Please enter name of $i sensor. Enter "x" to skip this step."
+    	  readValue
+    	  if [ "$RET" != "x" ]; then
+	  echo "DELETE FROM sensor_descr WHERE stationid='$STATIONID' AND type='$i' AND sensid='1'"|
+	     mysql -h $MYSQLHOST -u $DBUSER -p$DBPASSWD $DBNAME  
+	  
+    		SQL="INSERT INTO sensor_descr (stationid,sensid,type,name) "
+    		SQL="$SQL VALUES ('$STATIONID','1','$i','$RET')"
+
+    		echo "$SQL" | mysql -h $MYSQLHOST -u $DBUSER -p$DBPASSWD $DBNAME
+    		if [ $? != 0 ]; then
+    		   echo "Error running: \"$SQL\""
+    		fi
+    	  fi
+      done
+      
+      echo 
+      echo "-----------------------------------------------------------------"
+
+      if yesno "Do you want to enter data for another weather station and its senors (y/n) ? "; then
+              break
+      else
+              echo "======================================================================="
+      fi
+  
+done 

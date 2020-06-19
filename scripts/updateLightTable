@@ -1,0 +1,217 @@
+#!/usr/bin/perl
+
+# Script that will update a wetter MYSQL database to the new format
+# starting with version ws2500-0.99. 
+# 
+# R. Krienke 03/2007, krienke@uni-koblenz.de
+#
+require DBI;
+
+
+$driver="mysql";
+$sysDbName="mysql";
+$dbServer="mysqlhost";
+$dbUser="user";
+$dbPassword="password";
+$database="wetter";
+$defaultPort="3306";
+
+
+#
+#  Connect to database and return databasehandle
+#
+sub connectDb{
+   my($dsn, $dbh);
+
+   # Connect to database
+   #
+   $dsn = "DBI:$driver:database=$database;host=$dbServer;port=$defaultPort";
+   if( ! ($dbh = DBI->connect($dsn, $dbUser, $dbPassword,
+        { 'RaiseError' => 0, 'AutoCommit' => 1, 'PrintError' => 0 })) ) {
+       $errMsg="Cannot Connect to \"$dsn\" as $dbUser\n";
+       return(0);
+   }
+   return($dbh);
+}
+
+
+#
+# Close connection to database
+#
+sub closeDb{
+  my($dbh)=@_;
+
+  $dbh->disconnect();
+}
+
+sub runBackup {
+   my($ret);
+
+   warn "Running backup of database table \"light\" to file \"wetterdb-backup.sql\" ...\n";
+
+   if( -r "wetterdb-backup.sql" ){
+   	die "Backupfile \"wetterdb-backup.sql\" exists already.\nPlease move it elsewhere and restart script.\n\n";
+   }
+   $ret=system("mysqldump --opt -c $database light -u $dbUser -p$dbPassword -h $dbServer >wetterdb-backup.sql");
+   if( $ret/256 ){
+     die "Error creating back of database\n";
+   }else{
+     warn "Backup is OK !!!\n\n";
+   }
+}
+
+
+#
+# check if database already has new scheme
+#
+sub checkNewScheme{
+   my($dbh)=shift;
+   my($sth, $resRef, $start, $row);
+
+   $sth=$dbh->prepare("SELECT ok FROM light ORDER BY datetime,id LIMIT 1");
+   $sth->execute;
+   $resRef=$sth->fetchall_arrayref();
+
+   # Check if database has already new format
+   # This is true if the very firstentry in the light table has a "d" in 
+   # its ok column
+   $start=1;
+   if( $resRef->[0]->[0] =~ /d/ ){
+      $start=0;
+   }
+
+   if( $start ){ 
+      return(0) ;  # Old scheme
+   }else{
+      return(1);   # New scheme
+   }   
+}
+
+
+#
+# Change DB-Scheme to ne one
+#
+sub updateTableRows{
+   my($dbh)=shift;
+   my($sth, $refRef, $ref, $lastValue, $currValue, $h, $m, $sql, $diff, $id );
+   my($numRows, $count, $date);
+   
+   warn "Starting conversion ...\n";
+   $sth=$dbh->prepare("SELECT id, sunDur, datetime FROM light ORDER BY datetime,id");
+   $sth->execute;
+   $resRef=$sth->fetchall_arrayref();
+   
+   $count=$#{@$resRef};
+   if( $count >=0 ){
+      $lastValue=$resRef->[0]->[1]; # sundur value of first row; $resRef->[0]->[0] is id
+      ($h,$m)=split(/\./, $lastValue, 2);
+      $lastValue=$h*60+$m;  # Value of sunDur calculated in minutes
+
+      #
+      # Now calculate delta sunDur value for each existing table row
+      for($i=1; $i<= $count; $i++) {
+	     $ref=$resRef->[$i];
+	     $id=$ref->[0];
+	     $date=$ref->[2];
+
+             ($h,$m)=split(/\./, $ref->[1], 2);
+             $currValue=$h*60+$m;
+
+	     $diff=$currValue-$lastValue;
+	     $diff=$diff>=0? $diff:0;
+
+             # replace orig absolute sunDur value by calculated diff 
+	     $sql="UPDATE light SET sunDur=$diff WHERE id=$id AND datetime=\'$date\'";
+             $numRows=$dbh->do($sql);
+             warn "* Error changing sunDur value for id: $id \n" if(!defined($numRows));
+             undef $numRows;
+
+	     #print $sql, "\n";
+	     #print $ref->[0], ", ", $ref->[1], ", diff: ",$diff, "\n";
+
+	     $lastValue=$currValue;
+      }
+      # Mark the table to be "converted" by setting in the first entry 
+      # the ok column to "d" (delta). in this case this script when run again 
+      # won't do anything.
+      $ref=$resRef->[0];
+      $id=$ref->[0];
+      $date=$ref->[2];
+      undef $numRows;
+      $numRows=$dbh->do("UPDATE light SET ok=\'d\', sunDur=0 WHERE id=$id AND datetime=\'$date\'");
+      warn "* Error changing \"ok\" value for id: $id \n" if(!defined($numRows));
+
+
+      # Now we set sunDur to "0" for the very last row since here we cannot 
+      # calculate a diff value.
+      $ref=$resRef->[$count];
+      $id=$ref->[0];
+      $date=$ref->[2];
+      undef $numRows;
+      $numRows=$dbh->do("UPDATE light SET sunDur=0 WHERE id=$id AND datetime=\'$date\'");
+      warn "* Error changing sunDur value for id: $id \n" if(!defined($numRows));
+
+      warn "Conversion completed ...\n";
+   }else{
+      warn "Tables \"light\" is empty. No actions are required here.\n"
+   }
+}
+
+#
+# Check if we can connect to mysql-Server
+#
+sub testMysqlConnection{
+   my($dbh)=shift;
+   my($sth, @row);
+   
+   if( !$dbh ){
+   	warn "No valid database handle. Stop.\n";
+	warn "Please verify the access data (MYSQL username and password) \n",
+	     "in the head of this script (Variables: \$dbUser and \$dbPasswd\n",
+	     "as well as the name of the database server (\$dbServer) \n",
+	     "and then try again \n";
+	exit 1;
+   }
+   	
+   @row=$dbh->selectrow_array("SHOW STATUS");
+
+   if( $#row >=0 ){
+	warn "Connection to database \"$database\" as user \"$dbUser\" is OK\n";
+   }else{
+        closeDb($dbh);
+   	warn "Connection FAILED\n";
+	warn "Please verify the access data (MYSQL username and password) \n",
+	     "in the head of this script (Variables: \$dbUser and \$dbPasswd\n",
+	     "as well as the name of the database server (\$dbServer) \n",
+	     "and then try again \n";
+   	exit 1;
+   }	
+}
+
+
+#-----------------------------------------------------------------------------
+# main
+#-----------------------------------------------------------------------------
+
+$dbh=connectDb();
+
+warn "\nThis script will update the ws2500 light table of the wetter database \n",
+     "to a new format keeping all data making the needed conversions. Bevor \n",
+     "anything is changed, a backup of the existing light table is made into the\n",
+     "current directory. \n",
+     "Bevor continuing be sure that you have set the MYSQl user and\n",
+     "password variables in the head of the script else all operations\n",
+     "will fail. (Press ENTER to continue)\n";
+$x=<stdin>;     
+
+
+testMysqlConnection($dbh);
+
+if( ! checkNewScheme($dbh) ){
+   runBackup();
+   updateTableRows($dbh);
+}else{
+   warn "No changes needed. Database has needed format.\n";
+}
+
+closeDb($dbh);

@@ -1,0 +1,189 @@
+/* MYSQL general database scheme to store weather data of several weather stations
+ * R. Krienke, krienke@uni-koblenz.de, Jörg Köhler
+ * 
+ * Version 1.4 from 2006/05/18
+     - Changes: Renamed index of tables to "dataindex"
+ * Version 1.3 from 2006/05/17  (17.05.2006)
+ *   - Changes: Added multicolumn index to get faster access
+ *
+ * General infortmation:
+ * This database scheme allows data of several weather stations to be stored. For this reason
+ * each physical sensor needs an sensorId as well as a stationId. The sensorId depicts 
+ * the physical sensor, the stationId depicts the weather station the sensor is connected to.
+ * Both Ids start with 1.  The sensorId as well as the stationId are a key in the sensor_descr
+ * table that stores general information about a sensor. The stationId is also a key into the 
+ * station_descr table that stores general information about each weather station used.
+ *
+ * Each sensor has an ok field telling if the data stored in this row is new data ('1')
+ * or if it is the weather station marked the data as a copy of the last data ('0'). 
+ * Another purpose
+ * of the ok col is to mark datasets with data that are outside of the sensors range. If
+ * eg the humidity sensor has a measuring range of 20%-100% and humidity was <20% we can
+ * store the value 20% and for ok we say by convention 'h' indicating an underflow 
+ * of the humidity value.
+ *
+ * Each table has an id column that is automatically incremented when data is inserted.
+ * It serves as a uniqe key in each table and allows a "rollback" if during an insert 
+ * of data eg the network goes down so that this insert cannot be completed. Before
+ * such an insert you can store the current id in the table lastids then insert and if 
+ * something goes wrong delete all rows starting with the ids stored in lastids before.
+ * For more see description below.
+*/ 
+
+/* th_sensors stores all temperature/humidity sensor data .
+ * T is measured in °C, H in %.
+*/ 
+CREATE TABLE th_sensors (
+	id       	INT(10) UNSIGNED NOT NULL auto_increment,
+	stationid       TINYINT(3) UNSIGNED NOT NULL DEFAULT 1,
+	sensid		TINYINT(3) UNSIGNED,
+	datetime	DATETIME NOT NULL,
+	T		FLOAT(5,1),
+	H		TINYINT(2) UNSIGNED,
+	ok		CHAR(1),
+	KEY	        (id),
+	INDEX		dataindex(datetime,sensid,stationid)
+);
+
+/* pressure stores the !!relative!! air pressure.
+*/
+CREATE TABLE pressure (
+	id       	int(10) UNSIGNED NOT NULL auto_increment,
+	stationid       TINYINT(3) UNSIGNED NOT NULL DEFAULT 1,
+	sensid		TINYINT(3) UNSIGNED,
+	datetime	DATETIME NOT NULL,
+	P	        SMALLINT(4),
+	ok		CHAR(1),
+	KEY	        (id),
+	INDEX		dataindex(datetime,sensid,stationid)
+);
+
+
+/* table wind stores data from a wind sensor.
+ * speed is the measured wind speed in km/h
+ * gustspeed is the speed of windgusts in km/h if available
+ * angle is the winds direction measured in degree: 0:north, 90 East, 180 south, ...
+ * gustangle is the winds direction measured in degree: 0:north, 90 East, 180 south, ...
+ * range is the variation of the winddirection in degree. A value of 15 says, that the
+ * wind direction of a measuring period varied +- 15° around the main direction.
+*/ 
+CREATE TABLE wind (
+	id       	int(10) UNSIGNED NOT NULL auto_increment,
+	stationid       TINYINT(3) UNSIGNED NOT NULL DEFAULT 1,
+	sensid		TINYINT(3) UNSIGNED,
+	datetime 	DATETIME NOT NULL,
+	speed		FLOAT(5,1),
+	angle  		SMALLINT(3) UNSIGNED,
+	gustspeed	FLOAT(5,1) DEFAULT 0,
+	gustangle	SMALLINT(3) UNSIGNED DEFAULT 0,
+        `range`           FLOAT(4,1),
+	ok		CHAR(1),
+	KEY	        (id),
+	INDEX		dataindex(datetime,sensid,stationid)
+);
+
+/* the rain table stores data about the rain sensor.
+ * counter is the raw value of the rain counter received from the sensor.
+ * Having the counter value allows to recalculate the amount of rain if eg the 
+ * amount of rain for each "rain count" was wrong.
+ * diff is the abolute amount of rain that fell stored in mm*1000 (0,5mm => diff:500)
+ * evapotransp: is the evapotranspiration value measured in mm*1000
+*/
+CREATE TABLE rain (
+	id       	int(10) UNSIGNED NOT NULL auto_increment,
+	stationid       TINYINT(3) UNSIGNED NOT NULL DEFAULT 1,
+	sensid		TINYINT(3) UNSIGNED,
+	datetime	DATETIME NOT NULL,
+	counter		SMALLINT(4) UNSIGNED,
+	evapotransp     SMALLINT(4) UNSIGNED,
+	diff 		INT UNSIGNED,
+	ok		CHAR(1),
+	KEY	        (id),
+	INDEX		dataindex(datetime,sensid,stationid)
+);
+
+
+/* the light table stores information about a light sensor.
+ * sunshine is a flag if the sensor reported sunshine during the last period of time.
+ * sundur is the number of minutes in which the sun shone in the last timeperiod.
+ * lux is the current lux value divided by factor. eg if the lux value is 200000
+ * uvindex: index value used by davis vantage pro 2 station
+ * radiation: sun radiation in w/m*m 
+ * we would store 200 in "lux" and 1000 in "factor"
+*/
+CREATE TABLE light (
+	id       	INT(10) unsigned NOT NULL auto_increment,
+	stationid       TINYINT(3) UNSIGNED NOT NULL DEFAULT 1,
+	sensid		TINYINT(3) UNSIGNED,
+	datetime	DATETIME NOT NULL,
+	counter		SMALLINT UNSIGNED,
+	sunshine	TINYINT,
+	sundur		FLOAT(5,1),
+	lux		SMALLINT UNSIGNED,
+	factor		SMALLINT UNSIGNED,
+        radiation	FLOAT,
+	uvindex		FLOAT,
+	ok		CHAR(1),
+	KEY	        (id),
+	INDEX		dataindex(datetime,sensid,stationid)
+);
+
+
+
+
+/* A description of each weather station in use that stores data in this database.
+ * stationId is an identifier >=1 that is used in each sensor table to describe to 
+ * which weather station the data stored belongs. Here it identifies a particular weather station.
+ * name is freetext for the stations name.
+ * description is freetext for a short description of the station.
+ * manufacturer is freetext for the stations manufacturer.
+ * model is freetext for the model.
+ * location is freetext for a description of the stations location .
+ * rainbycount is the amount of rain for each count-value of the rain sensor in mm*1000 .
+ * altitude is the altitude above NN of the station to be used to calculate the relative air
+ * pressure.
+*/
+CREATE TABLE station_descr (
+        # Id of station. First station should have id 1  (not: 0)
+	stationid    TINYINT(3) UNSIGNED NOT NULL,
+	name         VARCHAR(80),
+	descr        VARCHAR(80),
+	manufacturer VARCHAR(80),
+	model        VARCHAR(80),
+	location     VARCHAR(80),
+	rainbycount  SMALLINT UNSIGNED NOT NULL,
+	altitude     SMALLINT DEFAULT -1,
+	KEY	     (stationid)
+);
+
+/* The table sensor_descr describes the sensors in use.
+ * sensid and stationid determine which sensor is to be described and which station 
+ * it beleongs to.
+ * type depicts the sensors type which must be one of the values given below in the table.
+ * name is freetext a name or description of the sensor.
+*/
+CREATE TABLE sensor_descr (
+	stationid TINYINT(3) UNSIGNED NOT NULL DEFAULT 1,
+	sensid	  TINYINT(3) UNSIGNED NOT NULL,
+	type    ENUM('th', 'wind', 'rain', 'light', 'pressure') NOT NULL,
+	name	VARCHAR(80),
+	KEY	(sensid, type)
+);
+
+/*
+ * Table lastids holds the id from the last data element of each sensor table from above.
+ * The ids in this table should be updated just before a bunch of data will be inserted
+ * into the sensor tables. If an error occurs, we can roll back and delete all
+ * entries in the sensor tables that have just been inserted because the id col in each sensor
+ * table is automatically incremented with each insert and this table holds the last id for each 
+ * sensor table before the insertion. So we simply delete all rows in all sensor tables 
+ * with an id bigger than the id stored in lastids for the sensor table.
+*/ 
+CREATE TABLE lastids (
+	stationid       TINYINT UNSIGNED NOT NULL,
+	id_PS       	INT(10) unsigned,
+	id_RS       	INT(10) unsigned,
+	id_THS       	INT(10) unsigned,
+	id_WS       	INT(10) unsigned,
+	id_LS       	INT(10) unsigned
+);

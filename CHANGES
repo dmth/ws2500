@@ -1,0 +1,1089 @@
+CHANGES
+-------
+
+$Id: CHANGES,v 1.19 2012/06/22 10:16:44 krienke Exp $
+
+Version 1.19, 22.06.2012
+-----------------------
+- Added script to improve speed based on optimized database index files
+  See script for some documentation. 
+
+
+Version 1.17, 15.03.2012
+-----------------------
+- Fixes bugs in ws2500 that prevented data for the light sensor from
+  beeing inserted into the database
+
+Version 1.16, 12.03.2012
+-----------------------
+- Changed database scheme to add files for evapotranspiration calculated
+  by Davis Vantage Pro 2.
+
+  *** Please run updateWetterdbScheme to update your database scheme. Only
+  *** changes that need to be made will be done. So there is no "danger" 
+
+- Added support in ws2500tomysql to insert evapotranspiration value for
+  Davis Vantage Pro 2 station from wview database into wetter Mysql
+  database.
+- Many bugfixes in wetter.cgi for better support of multiple weather
+  station including bugfixes for the new config scheme used in
+  wetter.cgi.conf
+  
+Special thanks to Arnim Staschke for his help in finding bugs and
+providing access to his own VP2 data!  
+
+Version 1.13, 23.02.2012
+-----------------------
+- *** IMPORTANT ***
+  - run updateWetterdbScheme to update the database scheme tp include
+    sun radiation and uvindex for Davis VP2 pro
+  - extended wetter.cgi:
+  	- wetter.cgi can now show uvindex and sunlight radiation graphics
+	- Speed improvement by SQL optimisations
+	- introduced new config scheme that allow the user to specify 
+	  a stationid as well as a sensorid so that especially in an
+	  environment with multiple station each sensor of each station
+	  can easily be addressed (for graphics and latest values).
+	  Old config scheme is stil accepted but deprecated. See
+	  wetter.cgi comments for more information.
+   
+
+Version 1.12, 08.02.2012
+-----------------------
+- *** IMPORTANT ***
+  - run updateWetterdbScheme to update the database scheme
+  - use the new wetter.cgi script that can handle the new database scheme
+    the old script will probably still work, the new one has new features
+
+- Fixed buffer overrrun seen in Gentoo Linux. Thanks to Stefan Nickl for the hint
+- Added option -S that switches off DCF time and uses linux system time instead for reading data from the station
+- Added support to include data from a Davis Vantage Pro 2 into the wetter mysql database and visialize
+  these data by wetter.cgi:
+	+ Changed Weather DB scheme to add support for station like the Davis Vantage Pro2 that measure wind and
+  	  wind gusts. You should run the script named updateWetterdbScheme to make these changes
+	+ Added support in wetter.cgi for windgusts in wind sensor display. By default windgust display is turned on
+  	  ws2500 users probably want to turn it off in the sensor definition in wetter.cgi.conf. There is 
+  	  a demo line in the comments in wetter.cgi: The line to be used here is:
+
+	      $sensorData->addSensor( {"sensType"=>"WI", "omit"=>["gustspeed", "statgustspeed"]}, {} );
+
+  	  Please note the omit-settings made in this configuration line which turn off the display of windgustspeed
+  	  as well as the output of statistical data about windgustspeed. 
+	  You can download the Davis VP2 package under
+	  http://userpages.uni-koblenz.de/~krienke selection
+	  "Wetterbeobachtung" or on the english version "weather observation"
+	  on the left side.
+
+- Changed the wetter.cgi config variable  $defaultStationId to "'.*'". 
+  The old default was usually "1", which is the id of the first (ws2500)
+  station. The new default stands for "any station". If you have data of multiple station 
+  in your database you might experience problems. If so, use the old default again.
+  The value given here is used as an argument to MYSQLs REGEXP function.
+
+
+
+Version 1.9, 16.06.2011
+-----------------------
+- Added support for gnuplot 4.4
+- changed incorrect defree symbol in several places
+- Implemented more design control via CSS by 
+  Thomas Hübner. It is now possible to write an external wetter.css file
+  that contains CSS statements to control the look of wetter.cgi. 
+  There is an example wetter.css provided that shows how this can be
+  done.
+- Added support for gnuplot 4.4  
+- Added support for a windrose display in the latest values. 
+  Currently there are still free windrose-icons missing so that at the
+  moment you can only activate this feature when you provide you own
+  icons. See comments in top section of current wetter.cgi for more
+  information about the needed icons.
+
+- *** IMPORTANT ***  
+  In order to use the new version you have to change your 
+  existing wetter.cgi.conf file a little bit by moving some lines
+  around.  You can take a look at the new wetter.cgi file to see wat has
+  to be put where. So its good to take a look at the new wetter.cgi and
+  compare the config inside with your existing wetter.cgi.conf.
+  There are three important points:
+
+  1. You have to replace the settings of $baseImgUrl to a $baseUrl and a
+  $baseImgUrl: Up to now you have eg:
+
+  $baseImgUrl="http://www.uni-koblenz.de/~krienke/wetter/images";
+
+  You have to change this to:
+
+  $baseUrl="http://userpages.uni-koblenz.de/~krienke/wetter";
+  $baseImgUrl="$baseUrl/images";
+  
+  2. The following lines (of course your version of these lines):
+
+  # Path where the created images are stored
+  $basePath="/home/admin/www/wetter";
+  $imgPath="$basePath/images";
+  # URL to access the images in Path "$imgPath" via the web-server
+  $baseUrl="http://userpages.uni-koblenz.de/~krienke/wetter";
+  $baseImgUrl="$baseUrl/images";
+
+  have to be moved from where they were now 
+  to somewhere near the top of the configuration (see current
+  wetter.cgi).
+
+  3. You should insert the new config lines:
+  
+  $latestWindRose=0;
+  $latestWindRoseUrl="$baseUrl/icons";
+
+  somewhere below the moved lines from 1. above because the windrose
+  configuration uses the $baseUrl variable that has to be defined
+  already.
+
+
+Version 1.8, 21.01.2010:
+--------------------------
+  - Changed runinstall to use /bin/bash instead of /bin/sh which caused 
+    problems e.g. on ubuntu 9.10
+
+Version 1.7, 21.01.2010:
+--------------------------
+  - Fixed an incompatibility with MYSQl database server version 5.1 and
+    probably later versions. Starting with 5.1 the string "range" is a
+    keyword in MYSQL. Unfortunately range is also a column name in the
+    wind table of the wetter database which caused errors in wetter.cgi
+    and other scripts. These scripts have now been fixed in this regard.
+  - Converted (most) Umlaut-Characters in the scripts to conform to UTF8
+    character set which is the default on all modern Linux systems.  
+
+Version 1.6, 02.12.2008:
+--------------------------
+  - Fixed another bug regarding the display of sun duration. Now this
+    display should work fine. The sunduration data of the station (a
+    total value) is broken down to minutes of sunshine in each
+    stations interval (as reported in ws2500 -s as "Interval time).
+    wetter.cgi displays it accordionly.
+  - Fixed a bug  wetter.cgi that is perl related. This bug caused 
+    syntax errors in some new perl interpreters.
+
+Version 1.4, 17.06.2008:
+--------------------------
+  - Added support for gnuplot version 4.2 in wetter.cgi. The installed
+    version of gnuplot should be detected automatically.
+  - Fixed a bug in wetter.cgi that could cause a corrupted data display.
+    This could happen if the first defined sensor of several in 
+    one graphics at some point in time
+    stopped providing data. Then the data graph could display nonesense.
+
+Version 1.3, 07.05.2008:
+--------------------------
+  - A bug fix in ws2500toawekas.
+    New weather data were not transferred to awekas in the time of
+    00:00-02:00 if you live in the MESZ timezone else the time range
+    where no data was transferred could vary. 
+
+Version 1.2, 12.11.2007:
+--------------------------
+  - Some more updates regaring light sensor data. 
+  - A bug fix in wetter.cgi regarding the display of table data.
+
+Version 1.1, 14.09.2007:
+--------------------------
+  - Small update to ws2500tomysql. The version before caused an error
+    when inserting data of a ligh sensor. 
+
+Version 1.0, 09.08.2007:
+--------------------------
+  - For MacOS: Fixed a syntax error (missing ";") in ws2500.c . Strange
+    enough, that only gcc in MacOS detected the missing ";"  
+
+Version 0.99, 28.03.2007:
+--------------------------
+  *** Important changes for owners of a light sensor
+
+  - This new version implemts a different interpretation of the 
+    sunduration value. In earlier versions this value was an absolute
+    counter that over time always increased as the sun was shining. A new
+    value (except when resetting the station or sensor) could never
+    be smaller than an older value. 
+    From this version on the ws2500 program as well as ws2500tomysql
+    treat the ws2500 stations value for the sun duration different. It
+    will be converted into a delta value between two samples taken from
+    the station. So now the value sunDur in the table light of the
+    database does no longer describe how long the sun has been shining 
+    from the time where you installed the sensor. Now this value will
+    describe how long in minutes the sun has been shining in the last 
+    measuring period eg in the the last 5 min, if you set the ws2500
+    period for taking data at exactly 5 min.
+    The reason for this change is that in the new scheme it is more
+    easy to create a graphical display for the sun duration. 
+
+    * What do you have to do:
+    You have to run the script updateLightTable once before using the
+    new version of the program and scripts if you already have old data 
+    from a light sensor. If you do not have a light sensor and there are
+    no data in a existing light table of the wetter database then there
+    is no need to do anything.
+
+  - The script wetter.cgi has been updated so that you now can display a 
+    new type of display for the sun duration. The new display type LD
+    (light duration) does this. See the script for an example.
+
+  - Please note: I do not have a light sensor, so I could not fully test
+    the functionality. If there are any problems please let me know.
+
+
+Version 0.98, 23.08.2006:
+--------------------------
+  - Minor bug fix in wetter.cgi. Corrected an error inside a SQL statement
+    that lead on MYSQL V3.x servers to an error but not on a MYSQL5
+    server. The problematic perl statement was:
+       $sql.= " ORDER BY loctime; ";
+    and has been corrected to 
+       $sql.= " ORDER BY loctime ";
+
+Version 0.97, 07.06.2006:
+--------------------------
+  - Minor bug fix in wetter.cgi. Some unicode characters had found their
+    way in the script into SQL statements where they do not belong.
+
+Version 0.96, 26.05.2006:
+--------------------------
+  *** Major changes. Important. Read carefully: ***
+
+  - This version offers a changed database scheme thought to store
+    data from many different weather stations. One of them is the ws2500.
+    You can of course also store data of several ws2500 stations in the
+    database. Up to 255 different weather stations are theoretically possible.
+    At the moment you can (using ws2500) store data of several ws2500
+    station in one database. You can also visualize data of different 
+    stations in one wetter.cgi diagram.
+    In the near future hopefully other stations will be supported to by 
+    other projects using the same database scheme.
+    The idea is to have one storage engine wit a fix format that is
+    capable of storing many stations data. This has the advantage that a
+    user may choose between software to visialize all of the data. And
+    using the software of his choice he can visualize data of different
+    stations.
+
+  - This new database scheme causes some changes:  
+
+  * All sensors (TH, wind, rain, ...) now start with a sensor id of 1.
+    Up to now a TH sensor started with 1, a wind sensor eg with 30.
+
+  * You have to replace the ws2500 binary, the ws2500tomysql and the
+    ws2500toawekas as well as the wetter.cgi scripts!!!!  All of these 
+    programs have to be used in the version contained in this package else
+    things will not work. 
+
+  * You have to run the updateWetterdbScheme script to modify your
+    existing MYSQL wetter database to the current scheme else the
+    new binary and scripts will not work. Before starting the script 
+    enter your MYSQL access data into the head of the script (user and
+    password and database server name). The script will create a backup 
+    of the "old" database before :-) starting its work.
+
+  * You +have to+ change the config variable %latest_do in the wetter.cgi
+    configuration. This variable looked like this up to now:
+    
+    $latest_do{"30"}="WindChill(1)";
+    $latest_do{"1"}="DewPoint,absHum";
+    
+    This configuration has to be changed to the following:
+
+    $latest_do->{"wind"}->{"1"}="WindChill(1)";
+    $latest_do->{"th"}->{"1"}="DewPoint,absHum";
+  
+  * You also have to change the ws2500toawekas configuration contained 
+    in the new version of this script. You need to adapt the sensor ids 
+    since in the new DB-scheme all sensor ids
+    of all sensors(th, wind, rain, ...) start with id 1. So basically
+    you will want to set $awekasPresSensId,  $awekasWindSensId,
+    $awekasRainSensId each to the value 1.
+
+
+  * Finally if you did not yet enter information about your sensors as
+    well as your station you *can* do this by calling runinstall -s (note
+    the -s option). This will help you fill the sensors_descr and
+    station_descr database tables used eg by wetter.cgi. If you start
+    from scratch calling runinstall (no: -s option) the script  will also do 
+    this for you. 
+
+  - In order to use this new version with a database created by an older
+    ws2500-version you should already have upgraded to at least version
+    0.70. If you are still using an older version you first have to
+    upgrade to version 0.70 which also implies an update to the database. 
+    
+
+Version 0.95, 03.04.2006:
+--------------------------
+  - Changes in wetter.cgi, statistics display:
+    + For sensors without a minimum (eg wind, rain) the statistics now
+      shows a "-" instead of "0". 
+    + For sensors without a minimum it is now avoided to run SQL to
+      find the minimum, which saves some time and results in faster 
+      display of the statistics results especially if long and many 
+      periods of time are displayed (eg many rows of years).
+  
+Version 0.94, 29.03.2006:
+--------------------------
+  - Added a statistical evaluation for the wind sensor. You can now see
+    the main wind direction in each period of time as well a a statistics
+    of how many days the wind blew with which strength. 
+  - Adapted the windspeed scale to what is documented in 
+    http://de.wikipedia.org/wiki/Beaufortskala
+  - Some small cosmetic chnages.  
+  - Provided a (german) documentation of the dataformat needed for
+    ws2500tomysql, the tool that xfers the sensor data into the MYSQL
+    database. I hope that this documentation will make it easier for
+    people who want to write a frontend to insert data of other stations
+    into the ws2500 database scheme. The file is in the scripts
+    subdirectory.
+
+
+Version 0.93, 23.03.2006:
+--------------------------
+  - Fixed a bug in statistics display that was GMT<->local time related and
+    could lead to wrong counts (+/- 1) eg of rain days.
+  - Fixed another time related bug in statistical mode. The start and
+    end time (not date) could be wrong (not equal to start/end of a day) in
+    case that the very first dataset was part of the period displayed.
+    This also could lead to wrong values of eg rain days.
+  - Improved performance for Min/Max/Avg calculation by using
+    SQL subselects. The new subselects are by default only used if your
+    MYSQL server is at least version 5.0. You can however turn
+    subselects manually off or on by setting $useSqlSubQueries to 0 or 1.
+    The first MYSQL server supporting subselects is V 4.1 so you need at
+    least this version if you want to give it a try.  The
+    speedup is visible in statistics mode when evaluating statistics
+    of several years. Here the performance win is about 20% using a 
+    MYSQL V5 database server.
+
+Version 0.91, 17.03.2006:
+--------------------------
+  - Fixed a rounding bug in wetter.cgi that lead to slightly wrong values
+  - Fix a display bug in textual display of rain data (value was shown
+    multiplied by 1000).
+  - Corrected the behaviour of dateadjustments in statistics mode when  
+    weeks or month display is selected. Now when the user given end date 
+    ends in the middle of a calender week the enddate is extended
+    to the end of the week.
+  - Changed output in statistics mode to be displayed as soon as
+    possible. Until now the output was shown when all data were
+    compiled. The new behaviour results in less delays for the user.  
+  - Changed the behaviour of ws2500tomysql -C to drop only those tables
+    that are part of the ws2500 project, not all existing tables.
+
+Version 0.89, 11.03.2006:
+--------------------------
+  - Fixed some small bugs in wetter.cgi
+  - Added new statistics component to wetter.cgi
+    This new component allows an easy overview of eg the number
+    of icedays, raindays, warm days, ... and min/max/avg values. The 
+    data can be calculated in divisions of days, weeks, months and years
+    beginning from a startdate to the user supplied enddate.
+    Tooltops allow the user to get more detailed infos about the data
+    by simply holding the mouse cursor above the figures. Links in the 
+    statistics table allow direct access to the underlying data.
+
+Version 0.88, 30.01.2006: 
+--------------------------
+  - Fix of a fix in 0.87. Due to a fix in the last version wetter.cgi
+    would misinterpret a date as a temp value in a t/H display with
+    multiple sensors leading to tempereatures of "2006" °C  :-)
+
+Version 0.87, 29.01.2006: 
+--------------------------
+  - Fixed some compiler warnings with gcc 4.0
+  - Fixed a bug in wetter.cgi that could lead to incomplete data
+    display.
+  - Wrote a script removedoublerows, that can find and eliminate 
+    data rows that exist twice in the database. For more see README of
+    this script in the scripts subdirectory.
+
+Version 0.86, 11.01.2006: 
+--------------------------
+  - Changed ws2500.c so that it accepts the new ws2500 firmware version 
+    1.3. If anyone has a ws2500 with firmware 1.3 and sees any problems 
+    please let me know.
+
+
+Version 0.85, 06.06.2005: 
+--------------------------
+  - Bug Fixes
+    The windchill formula used in wetter.cgi is only valid up to a
+    temperature of 33°C. In earlier versions there was no test if this
+    condition was true so it could happen that if temperature was > 33°c
+    the formula delivered wrong results with a windchill higher than the
+    temperature. This has been fixed.
+
+
+Version 0.84, 06.06.2005: 
+--------------------------
+  - Bug Fixes
+    - In ws2500 some times were increaded for better Mac support. Thanks
+      to Rüdiger Ide for his patches.
+    - In wetter.cgi some more problems with regions having no timezones
+      were fixed. A bug introduced in 0.83 was fixed that led to an
+      error if there were no data to display for a period of time.
+    - Bug fix for a bug introduced in the previous version: In the
+      latest display the rain values were not displayed correctly.  
+  - Feature
+    - wetter.cgi now can display Speed in km/h as well as Knots. Each
+      wind display can have an individual speed setting (km/h, Knot).
+      The display fo rthe latest data is independent of the graphics. 
+      Take a look at the script and the variable windSpeedType that is
+      used to control what unit should be used.
+
+      
+Version 0.83, 06.06.2005: 
+--------------------------
+  - Bug fixes:
+    - in ws2500tomysql I corrected the SQL staements to create the
+      wetter-database. Before this release you might have seen 
+      problems when you tried to create the database. Some other
+      warnings of the script have also been fixed.
+    - In wetter.cgi there was a bug that led to incorrect graphics 
+      in a graphic display that displays multiple sensor data and one of the
+      sensors has been added to the station later than the other.  So
+      the bug showed up if there were more data for sensor A than for B and
+      both were displayed in one graphics.
+    - Fixed a Bug in wetter.cgi for regions in the world that have no
+      daylight saving time. Up to now the date values entered were not
+      interpreted correctly.
+
+Version 0.82, 01.04.2005: 
+--------------------------
+  - New additional configuration path for ws2500 and all other scripts.
+    If you like you now can put all configuration files in the directory
+    /etc/ws2500/  . Please note that configuration files in this
+    directory never have a leading dot. So the file .ws2500.conf
+    would have to be renamed to /etc/ws2500/ws2500.conf and e.g. 
+    .ws2500toawekas.conf would have to be renamed to 
+    /etc/ws2500/ws2500toawekas.conf . The /etc/ws2500 directory is
+    always searched last. So when e.g. a file .ws2500.conf is found in the
+    users home directory this file will be used and not a 
+    /etc/ws2500/ws2500.conf file even if it should exist.
+  - Fixed a bug in wetter.cgi that led to incorrect start and end date
+    values when calling ws2500 with the "days" or "hours" cgi parameter.
+  - Slightly improved the online help in wetter.cgi.  
+
+Version 0.81, 16.02.2005:
+--------------------------
+  - New options in wetter.cgi
+    - The option variable $navPanelPos can be used to determine the
+      position of the navigation panel above (default) or below the
+      graphics. The values "top" and "bottom" are allowed.
+    - The sensor graphics option lowYbounds can be used to either
+      delegate the dtermination of the lower value of y-range of the 
+      display to gnuplot or to 
+      set it to a fixed value. if unset the script builtin default will
+      be used. E.G in a TH display the temperature start at 0°C by
+      default. Ich you don't like this, use lowYbounds to change it. See
+      the script header for an example how to set the option.
+  - Improved ws2500toawekas    
+    - ws2500toawekas now also works if you do not have all sensors
+      needed. The missing sensor values are substituted by "0" values.
+      For each missing value a warning will be printed on stderr, so
+      when calling ws2500toawekas you should redirect the error to
+      somewhere as well as the result that is printed to stdout:
+
+      ws2500toawekas > awekas.datafile 2> errorfile
+
+      When redirecting the errors, don't forget to read them anyway...
+
+Version 0.80, 10.02.2005:
+--------------------------
+  - Bug fixes in ws2500
+    - Fixed a bug that prevented a protocol change (-V) even if 
+      the stations firmware was 3.1 or 1.1 (not 1.0).
+    - Fixed the error handling for humidity sensor. Up to now a warning
+      was issued and the humidity was set to 0. Now it is set to the
+      lower limit of 20% and the new flag is set to 'h' (instead of 0,1)
+      to indicate the error which when using ws2500tomysql will also be
+      visible in the database. A warning is also printed like before.
+  
+  - Bug fix in ws2500toawekas
+    - Corrected the output of the pressure difference of the last 6
+      hours to now.
+
+  - Bug fixes in wetter.cgi
+    - Corrected a problem that led to an error if the script is run
+      on a server in a time zone *without* daylight saving time (dst).
+    - reversed the sequence in that virtual and real sensors are
+      plotted. Now virtual oneis are printed before real ones. This way
+      the plot of a real sensor with the same value as a virtual one
+      (eg. temp and windchill) covers the virtual, so you see the 
+      plot of the real.
+      
+
+Version 0.79, 21.01.2005:
+--------------------------
+  - Bug fix in wetter.cgi:
+    Under cerrtain conditions the calculation of the total sum of rain
+    for the current day was wrong. This happened when rain fell after
+    midnight in the "gap" between GMT and local time. In Germany the error
+    occured when rain fell between 00:00:00 and 00:59:59 if the output
+    was configured to display local time instead of GMT. This has been
+    fixed. It now works correctly. 
+  - Bug fix in ws2500toawekas. 
+    The same error like above. The total sum of rain reported to awekas
+    could be wrong under the conditions described above.
+
+Version 0.78, 21.01.2005:
+--------------------------
+  - New featur in ws2500:
+    In ws2500 there is a new check for the date deleivered by the
+    station. If the stations date differ to much (>60days) from the
+    date of the linux host system, an error will be printed. 
+    See README ("date checks") for more infos. New option -i to circumvent 
+    this new check if wanted.
+  - Bug fix in wetter.cgi
+    The internal km/h->beaufort table has been revisited and corrected.
+
+Version 0.77, 20.12.2004:
+--------------------------
+  - Bug fixes in wetter.cgi:
+  	- Fixed display settings handling across calls that led to 
+	  sudden changes of eg the sample time when changing the display
+	  period.
+	- Fixed a bug that led to a display of a max values that
+	  was rounded incorrectly.
+  - Changed user interface in wetter.cgi a little to allow quick
+    access to different time periods (days, weeks, months) like
+    eg 1,3,6,12 months not only for one day, one month or one week.
+
+Version 0.76, 09.11.2004:
+--------------------------
+  - Bug fixes in wetter.cgi for automatic gnuplot 4.x/3.x recognition
+    and command generation.
+  - Some smaller bug fixes in wetter.cgi.
+
+Version 0.75, 18.10.2004:
+--------------------------
+  - Added support in wetter.cgi for automatic recognition of the installed
+    gnuplot version. gnuplot 3.7 compared to gnuplot 3.8 and 4.0 have a
+    different syntax. wetter.cgi should now work with both versions.
+    Thanks to Dirk Schalge for his hint.
+  - Added new Display Type "WA" to wetter.cgi which displays the wind angle 
+    and variance in the wind direction over time.
+  - Some smaller bug fixes in wetter.cgi.
+
+Version 0.74, 13.10.2004:
+--------------------------
+  - More bug fixes in wetter.cgi
+     - Fixed wrong date display in MMA table below graphics
+     - Fixed bug that prevented negative temperatures from virtual
+       sensors beeing displayed in a TH graphics
+  - Added new feature: Display can now also be in hour average not
+    only in average based on days, weeks ....
+  - The hour display mode is selected automatically if more than
+    185 days of data will be displayed (to save time). This can be 
+    configured by setting the variable $doAutoBaseData to the number of 
+    days you like or 0 to disable this automatic switching.
+
+Version 0.73, 08.10.2004:
+--------------------------
+  - Bug fixes for wetter.cgi
+  - New configuration feature for wetter.cgi to have more control
+    about the Max/Min/Avg tbale display below a graphics for virtual
+    sensors.
+
+Version 0.72, 01.10.2004:
+--------------------------
+  - Improved support for MacOs X. The ws2500 program should now run fine
+    on this architecture.
+  - Rewrote large parts of wetter.cgi for graphical display of data.
+    This was due to maintainace reasons and to add some new functions:
+       + wetter.gi now supports virtual sensors (like windchill)
+       + the look of the output can now be controlled by stylesheets
+       + wetter.cgi offers a graphical representation of the sensor
+         data as well as a textual, tabular representation.
+       + better configuration support to view only part of the
+         sensors variables (eg T, instead of T and H for a TH sensor).
+  - Fixed some bugs in wetter.cgi	 
+
+
+Version 0.71, 03.06.2004:
+--------------------------
+  * When upgrading from an older version prior to 0.70 to this version
+  * please read the notes for version 0.70 as well !!!
+
+  - Bugfixrelease:
+    - Fixed bugs in ws2500towekas, that caused an empty awekas data file
+      if one sensor was eg defect so that there were no current data for
+      this sensor. Now ws2500toawekas will print a 0 value for a missing 
+      sensor needed for ws2500toawekas. At least the temperature sensor
+      however must still exist and provide current data for the script
+      to work.
+    - Fixed a bug in wetter.cgi that prevented a sensor display if 
+      one of the sensors displayed had no current data (eg. defect).
+    - Fixed another bug in wetter.cgi that led to an incorrect display 
+      of data if you used the hours=n CHI script parameter to restrict
+      the display to data of the last n hours.
+
+
+Version 0.70, 13.04.2004:
+--------------------------
+  *** Major changes. Important. Read carefully: ***
+  - Date and time of datasets are no longer stored
+    in local time in the database but in GMT.  This solves the summertime
+    problems. See also README file: "DATE and TIME stuff" for more infos.
+  - Database scheme was changed. The "date" and "time" columns were changed to
+     a single 
+    "datetime" column. The script  convLOCALTIMEtoGMT  is provided to convert
+    the database scheme as well as all old data from local time to GMT.
+    Please take care, that your system is using the correct timezone of your 
+    contry, else the conversion will convert the date and time values into 
+    incorrect values.  The script has no way of controlling this. 
+    Also see README for some hints on this.
+    The script when called will ask you for the name of your database server 
+    and the weather database name, user (used to insert data) as well as the 
+    password. Next it will create a backup of the old database and start the 
+    conversion. After conversion is done you HAVE to use the new utilites 
+    and ws2500 program!!! If you do not want to convert
+    you cannot use any version after 0.70.
+
+	!!! You can only run this new version if you convert your database 
+	!!! with the given tool. After conversion you have to use the new 
+	!!! versions of utilities ws2500tomysql, ws2500toawekas, wetter.cgi 
+	!!! as well as the new ws2500 program.
+	!!! Else nothing will work! Please take care of the existing
+	!!! configuration of eg ws2500tomysql. If you wrote it to the script 
+	!!! itself, extract this information and write it to the config file, 
+	!!! here: ~/.ws2500tomysql.conf. Do the same for wetter.cgi. 
+	!!! If you want to upgrade from a version earlyer that 0.52 to 0.70 then 
+	!!! you have to do this in two steps. First upgrade to say 0.67. This 
+	!!! upgrade means to run the convert_rain2.pl-script, then update to 
+	!!! 0.70 and run the convLOCALTIMEtoGMT script. Next you can use
+	!!! version 0.70.
+
+  - The wetter.cgi-script now supports a hours=n and a days=n parameter in the 
+    calling URL. 
+    Using one of both will enable you to initially display the data of the last n 
+    hours or the last n days of data instead of the default week display. So you 
+    can make a bookmark that automatically takes you to display that shows a 
+    period of time you like. More info is in the online help of wetter.cgi for
+    the startdate, endate fields.
+  - Bugfixes. Thanks to  Göran Larsson for finding these two bugs:
+  	- a wrong type declaration
+	- an error in getData that led to the fact, that when reading longer 
+	  portions of data (eg ws2500 -x) the date field of the data was getting 
+	  out of sync the longer the  process of reading data was taking.   
+	  So it could happen that the last data read
+	  from the ws2500 station had a date that was about one minute wrong.
+    
+
+Version 0.67, 05.03.2004:
+--------------------------
+  - Added some support scripts for database backup and to use ws2500 
+    to set the linux system time in conjunction with chronyd. This way
+    the linuxsystem can even act as a NTP server to other systems.
+    However since the ws2500 itself has only a resolution of 1 sec 
+    the whole system will not be better than this value.
+  - Removed some smaller bugs
+  - Added information to the debug output that shows if the ws2500
+    configuration file was found (or not) and if where it was found.
+
+Version 0.66, 29.02.2004:
+--------------------------
+  - Bug fixes in ws2500:
+      * Programmed support for the bug in ws2500 clock that 
+        ignores the date "Feb 29" until 03:00 of this day and instead
+	displays a date of Mar 01 (in the time from Feb 28 midnight 
+	to Feb 29 02:59 in a leap year).
+	This bug led this year to the fact that in the period from above
+	data were inserted with a date of 01.03.2004 which was wrong.
+	You have to remove them manually from the database or if you are
+	quick and start today (29.02.2004) you can dot most of the work 
+	by SQL: update th_sensors set date="2004-02-29" where date =
+	"2004-03-01". Then do this for the other tables as well
+	(light,rain,wind,inside).
+      * The tolerance check could go mad if an existing sensor suddenly
+        goes away (eg defect) when a "lastvalue" file was used. in this
+	case ws2500 continued to do tolerance checks for the sensor that
+	no longer existed which led to strange effects when this sensor
+	(a replacement of it) finally comes back again. In between the
+	tolerance value had eg gone to 0 for this sensor and now it
+	delivers a valid value that is for a temp sensor eg 20.0.
+	Allthough the value is correct it was rejected by tolerance
+	check. This has been fixed. If a sensor goes away and is no more
+	visible to the ws2500 station tolerance check will be disabled
+	for it even if it was enabled before.
+      * If a sensor had more than 127 drop outs the counter might have 
+      	turned to a negative value.
+   - Other fixes   
+      * Fixed a bug in trend data display, that lead to either a display
+        of no data or of wrong data of wetter.cgi.
+      * Fix ws2500toawekas not printing anything sometimes.
+      
+
+Version 0.65, 22.02.2004:
+--------------------------
+  - Fixed a bug in the ws2500toawekas script that led to a transmission
+    of a rain summary that was alwayas "0".
+
+Version 0.64, 16.02.2004:
+--------------------------
+  - added a support script for the AWEKAS(http://wetter.kremstalnet.at/awekas/index.htm) 
+    project. The script automatically gathers all data needed to create 
+    the AWEKAS upload file from the MYSQL database.
+    The script is called ws2500toawekas and is in the "scripts" subdirectory.
+  - Improved the trend data display in the latest data section of wetter.cgi.
+    It now also displays the amount of changes for temp and pressure sensors
+    by displaying an arrow up/down sign in different colors. The color
+    is selected depending ob how much eg the temperature changed.
+    It can also display the absolute difference right to the arrow. 
+    You can configure what is to be displayed 
+    as well as the amount of change of a sensor value needed to display 
+    the trend symbol in a certain color. See the head of the script for more infos.
+
+Version 0.63, 16.02.2004:
+------------------------
+    Removed. Everyone using it should instead download 0.64. In 0.63 in
+    the ws2500toawekas script there waa a test missing that could lead
+    to old data beeing provided to AWEKAS. This was fixed in 0.64.
+
+Version 0.62, 22.01.2004:
+--------------------------
+  - added a runinstall installer script which guides you through 
+    most parts of the initial setup.
+  - changes in wetter.cgi:
+  	+ Error display in the latest data section if a sensor had to
+	  many drop outs (name is eg colored red). Thanks to Joerg
+	  <joerg@alcatraz.shacknet.nu>.
+	+ Display of trend Data for pressure and rain. You can configure
+	  that in the latest data section three additional values will
+	  be displayed showing the pressure eg 1H, 6h, 24h ago or the
+	  amount of rain that fell the last hour, last 12 and 24 hours.
+	  The number of hours is configurable.
+	+ Better detection of the wetter.cgi configuration file. If it
+	  is placed in the same directory like wetter.cgi, with
+	  ".conf" appended to its name it should be found automatically.
+	+ Some more smaller bugfixes in the script.   
+
+Version 0.61, 26.12.2003:
+--------------------------
+  - Hopefully finally solved the timeout problem in ws2500.
+   	+ The method is quite easy: If the station times out, the command
+	  sent by ws2500 to the weather station
+	  that caused this timeout will be resent to the station, i.e 
+	  the communication to the station is reinitialized and then the 
+	  last command is beeing resent.
+	+ To improve things further the ws2500 output is buffered, so printing
+	  the results will take less time and make it less probable that
+	  the station disconnects itself between two commands for
+	  retrieving data.
+
+  - Added a new error message (return status) of ws2500 in case a sensor
+    has to many drop outs. Up to now only an entry in the log file was
+    made, now a mail is send to the admin by the getws2500data script 
+    which uses the new exit status of ws2500 to recognize this situation. 
+
+    !!! You need to run the new version of getws2500data to get things
+    !!! right, since the numbering of the error messages changed a bit.
+    !!! The check is only performed if you define the
+    !!! MaxDropOutCount variable in your .ws2500.conf file.
+	
+
+
+Version 0.60, 19.12.2003:
+--------------------------
+  - Bugfix for windchill calculation in wetter.cgi. 
+
+Version 0.59, 15.12.2003:
+--------------------------
+  - Corrected bugs and added features to the display script wetter.cgi
+    
+    New features:	+ In the section where the latest weather data
+    			  are displayed you now can additionally display
+			  the absolute humidity, windchill and dew point
+			  if you have the needed sensors (eg wind
+			  sensor). To do so you need to add a new
+			  variable %latest_do to your config file that
+			  describes from which sensors to get the values
+			  needed.
+			+ Besides average values you can now also
+			  graphically display minimum,maximum as well as
+			  average values of your sensors data based on
+			  data of days/weeks/months/years.
+
+  - Some updates in the documentation			  
+
+
+Version 0.58, 03.11.2003:
+--------------------------
+  - Extended functionality of wetter.cgi and a little facelifting
+    Curious? Look at: http://userpages.uni-koblenz.de/~krienke/wetter/wetter.cgi
+
+    New features :    + You can scale images eg to take a closer look at
+                        some details. 
+                      + Data graphs can now not only be based on the
+		        original data but also by one click on average
+			values for days, weeks, months and years. This
+			allows a smoothed display of data and so better
+			analysis of long term data.
+		      + Added a help feature for the most important
+		        parameters.	
+		      + Added a $contact variable which is printed at
+		        the very bottom of the page to give the visitor
+			of this page an address who is responsible for
+			this page.
+    Bugfix: In the rain sensor display when there was no rain, the left
+            and right Y-axes legend did not show the same value range. 
+	    This has been fixed.
+		      
+
+Version 0.57, 21.10.2003:
+--------------------------
+  - Added a new feature for data display in wetter.cgi:
+    wetter.cgi now knows about a display type "WD" which displays the
+    winddirection over the windspeed. So you can see for a certain
+    period of time from where the wind came most of the time and how
+    strong it was. For a demo see as usual:
+    http://userpages.uni-koblenz.de/~krienke/wetter/wetter.cgi
+
+Version 0.56, 19.10.2003:
+--------------------------
+  - Now autom has come, temperatures fall < 0 and bugs show up ...
+    Fixed a bug that clipped the display of temperatures below zero in the 
+    temp graphics display created by  "wetter.cgi".
+
+Version 0.55, 05.09.2003:
+--------------------------
+  - Reimplementation of the configuration part of wetter.cgi
+    The user now can quite freely place the sensor graphics.
+    He also can now have several T/H graphics with  each a display of one or 
+    more T/H sensors. The sequence of the other graphics like Pressure,
+    Rain etc can be adjusted. It is also possible to select which
+    sensors sould appear in which sequence in the display of the latest
+    values. The downside is, that the configuration of wetter.cgi has
+    changed and has to be adapted. See README of script and comments in
+    the script.
+  - Added firmware 1.2 as valid to ws2500. If someone has this firmware 
+    and sees strange sensor values in the output of ws2500 please
+    contact me.
+
+Version 0.54, 20.08.2003:
+--------------------------
+  - Another bug fix in decoding rain data. Thanks to Willem Eradus ...
+    The fix might result in a display of not existing rain for the 
+    first value that is read with the new version. You can fix this by
+    changing the rain table in the database by entering a "diff" value
+    of "0" for the wrong row. Use phpmyadmin or eg mysqlnavigator to do so.
+  - A bug that prevented some datasets from beeing extracted from the
+    station and a bug decoding humidity values. Thanks again to Willem.
+  - Changes in wetter.cgi. The script will is now able to display more
+    sensors in the "Latest Data" overview. See README-file of wetter.cgi.
+    Thanks to Thomas Dreßler for his work.
+
+
+Version 0.52, 13.06.2003:
+--------------------------
+  - A bug fix in ws2500 for rain tolerance check. Now also ws2500 itself
+    will only reset the rain amount in its output not the rain counter
+    sensor value, leading to better tol check behaviour.
+  - Another bugfix in ws2500tomysql regarding tol checks if they are
+    disabled.
+
+
+Version 0.51, 10.06.2003:
+--------------------------
+  *****  Attention *****
+  * From version 0.49 to 0.5 there was a change in the database scheme that
+  * fixes a bug in the rain sensor handling. To use versions starting with 
+  * 0.50 you have to convert any EXISTING "weather" database. To do so please
+  * use the script convert_rain2.pl that was written by Thomas Dressler 
+  * (tdressler@tdressler.net>) and is provided in the script subdirectory. 
+  * It will convert you rain table. After the conversion you can only
+  * insert new data with ws2500 version >= 0.50! Without converting you
+  * cannot insert data in your old database using ws2500 verions >=0.50!
+  *
+  * In version prior to 0.49 there was a bug that led to the effekt that
+  * the raincounter started with 0 again allthough the range of the counter
+  * was not yet exceeded. This was fixed in 0.49. This fix again could 
+  * cause problems with tolerance check. So better delete your existing 
+  * "last value"-file when upgrading to avoid problems. 
+
+  New stuff:
+  - Changes in rain-table of database. Now there is a new column 
+    called diff which contains the absolute amount of rain for a certain 
+    interval in time. This eliminates the problem that the rain counter
+    in the weather station will eventually overflow since its only a 
+    11 bit counter. Overflows are handled automatically by ws2500 and
+    ws2500tomysql. 
+
+  - ws2500
+    Changes in the tolerance check code. Now there is no longer a check
+    for the rain sensor if its value is to low. The tol check applies
+    only if the value possibly is to high. A check on a to small value is
+    impossible since during daily operation the rain counter may overflow
+    and start with the value zero, ...  again. 
+    The output formats of ws2500 have slightly changed. In usual output
+    you can now not only see the rain counter but also the absolute
+    amount of rain. Since this value is always a difference of the
+    current counter and the last rain counter value the absolute value 
+    is only printed if
+    you extract more than one value from the station or if tolcheck is
+    enabled (usually you will use a database and ws2500tomysql 
+    and then you always see the amount of rain anyway).
+
+  - ws2500tomysql:  
+    Adapted ws2500tomysql to the new db scheme and implemented a way
+    to have the configuration for ws2500tomysql in a config file. See
+    notes in the head of the script.
+    The new version of ws2500tomysql will complain if you try to insert 
+    data into a database that still has the old database scheme (no diff
+    column in rain table).
+
+  - wetter.cgi  
+    Changed wetter.cgi script to be compatible with new database scheme.
+    Implemented a way to write configuration data in a file that is read
+    when wetter.cgi is started. See head of script for more information.
+    To use this feature your web server has to be able to access the
+    config file on filesystem level (not via http).
+  
+  Thanks a lot to Thomas Dressler for his help in coding and for his
+  help in finding and solving problems.
+
+
+Version 0.49, 19.05.2003:
+---------------------------
+- Fixed one bug with rain-sensor counter that was limited to 8bit
+  alltough it is 11 bit on a ws2500PC station. 
+  Watch out there is still a problem inside the code if the counter will
+  pass the 11 bit value. Then it will start with 0 again which will lead 
+  to a problem. Hope to find a solution until then ...
+- Applied a fix from Dietmar Tallroth that helps correcting the
+  timeout problem.
+- Small fixes in wetter.cgi.
+
+
+Version 0.48, 30.04.2003:
+---------------------------
+- Added a third colum to each tol check variables in .ws2500.conf . 
+  See doc in demo "dot.ws2500.conf" file what this is about. 
+  *** You have to change your existing .ws2500.conf file accordingly !!! 
+  *** and you should remove an existing lastvalue file
+- Added a MaxDropOutCount Variable for config file that if set will lead
+  to a warning of ws2500 to stderr if a sensor has more drop outs than
+  this value.
+- renamed .ws2500.conf demo file in distrib to dot.ws2500.conf to avoid
+  using this file without really wanting to.
+- Changed output of -s to start with th sensor number 1 instead of 0
+  to make output consitent (does not influence output of -t)
+- Changed config variables in .ws2500.conf for tolcheck of TH sensors
+  to start with value _1 instead of _0 (see new demo file) for
+  consistency
+- Fixed some more smaller bugs in tolerance check routines  
+
+
+Version 0.46, 16.04.2003:
+---------------------------
+- Some Bugfixes for tolerance checks in ws2500 & getws2500data
+- Better integration of getws2500data and ws2500 for tol checks
+
+
+Version 0.46, 16.04.2003:
+---------------------------
+
+- New feature: Tolerance check for sensor values. See README for
+  details.
+- Fixed some small bugs
+
+
+Version 0.44, 08.04.2003:
+---------------------------
+- New Versions of the scripts ws2500tomysql and wetter.cgi have been
+  added. 
+  *****  Attention *****
+  The database scheme used by ws2500tomysql had to be changed slightly.
+  Thanks to Thomas Dressler for this hint. 
+  If you already have been using ws2500tomysql you should modify your
+  current database scheme accordingly with a tool eg like phpmyadmin or
+  mysqlnavigator. You have to change the following fields in the "light"
+  table:
+  - Type of column "factor" has to be changed from "tinyint" to "smallint"
+  - A new column "pfactor" has to be inserted with type "smallint"
+
+  If you create a new database withthe new ws2500tomysql the new scheme will 
+  of course be used automatically.
+  
+- The wetter.cgi-script has been extended to also display the light
+  sensors data. You can switch this very sensor display on or off (eg if you do
+  not have a light sensor). See the script on how to do this.
+
+- Some minor changes in ws2500 for compatibility reasons. Thanks to 
+  Ton Engwirda for this hint.
+
+
+Version 0.42, 31.03.2003:
+---------------------------
+- Fixed a problem in ws2500 which caused wrong time values to be used
+  when printing sensor data. This bug showed when the current date was
+  in the period of daylight saving time (DST).
+
+
+Version 0.41, 22.03.2003:
+---------------------------
+- Some more smaller changes and fixes in wetter.cgi
+
+
+Version 0.40, 22.03.2003:
+---------------------------
+- Update of ws2500.cgi script. Now shows Max/Min/Avg for all sensors in
+  overview and detailed image.
+- Smaller fixes for kompatibility in getws2500data  
+
+
+Version 0.39, 20.03.2003:
+---------------------------
+- Solved some timing problems that happen on some linux system. One
+  candidate was a RedHat machine that formed the base for an esmith
+  server. The problem is, that those systems deliver an SIGIO signal
+  when there is not data that could be read from the station. This
+  prevents the initial connection to the station to be stablished. 
+  The fix incorporated in this release was to try a little longer to set
+  up tthe connection, so you might see the program do "nothing" for a
+  short while (max ~20 sec). Thanks to Michael Gerber for providing the
+  test system.
+- Changed the output of -t so that the temp/humidity values from the
+  inside sensor are no longer marked as beeing part of the inside sensor
+  but being a th_sensor (temp/humidity). The consequence is that the
+  script ws2500tomysql will now insert the th-value from the inside sensor
+  into the th_sensors table and no longer in the inside table. When
+  creating a new database by ws2500tomysql the tables are now created
+  accordingly. The th/value of the inside sensor are inserted as sensor
+  number (sensid) 17 into the th_sensors table.
+- Added a script for web displaying data. If you want to take a look at
+  the results of this script, take a look at:
+  http://www.uni-koblenz.de/~krienke/wetter/wetter.cgi
+  The display shows real data that are usually updated once an hour.
+  
+
+
+Version 0.38, 13.03.2003:
+---------------------------
+- Fixed a series of typos that prevented Light ans Inside sensor data 
+  to be inserted into a mysql database. Thanks to Michael Gerber for his
+  help in testing.
+- Fixed a bug in the output of the sensor addresses that led to a wrong
+  display of the light sensors address.
+
+
+Version 0.37, 08.03.2003:
+---------------------------
+- Fixed some decoding errors of data especially in rain sensor
+- Added new scripts ws2500tomysql and getws2500data
+
+
+Version 0.32, 24.02.2003:
+---------------------------
+- Fixed some problems with proper exit status of program
+- Fixed wind sensors new flag bug. Flag should now be correct
+
+
+
+Version 0.31, 23.02.2003:
+-------------------------
+- Corrected port locking, that was not done up to now
+- Some cosmetic changes and corrections
+- Inserted output for light sensor in status that was forgotten

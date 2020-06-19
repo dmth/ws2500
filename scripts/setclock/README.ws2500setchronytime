@@ -1,0 +1,104 @@
+Copyright
+---------
+
+ws2500setchronytime is written by Rainer Krienke and is distributed under the
+GNU General Public License.
+
+
+Author and warrenty
+-------------------
+
+Rainer Krienke, krienke@uni-koblenz.de
+
+The author does not provide any warranty nor responsibility  for whatever might
+happen by using this program. If you run it things happen since YOU pressed the
+ENTER key. So if your dog starts barking at you or stops eating and looks
+sick after you started the program, don't blame me ....
+
+
+
+Wat can it do?
+--------------
+This script can help you to set the time on your linux system from the
+ws2500 DCF clock. If you do so you can then use you system as a NTP
+server for other hosts in yout network, that can synchronize their time
+with your server using the standard NTP protocol. 
+
+The script is only resposible for reading the time from the ws2500
+station and setting the systemtime by using the chronyc command.
+chrony (http://chrony.sunsite.dk/) is a simple NTP server that can be
+controlled by the chronyc command. The chrony script in this directory
+is a start/stop script (suitable for SuSE Linux) to start ans stop the
+chronyd that has to be running all the time. 
+
+Please note. The ws2500 clock has only a resolution of 1 sec. Besides
+this the script to read the ws2500 clock takes also some time and never
+exactly the same time. So as a result your clock will never be more
+exact than about 1 sec. The next problem is that the ws2500 clock does
+only synchronize with the DCF signal at 03:00 at midnight (or when it is
+switched on) so the rest of the day the internal ws2500 clock is running on its
+own. I have no information how exact this internal clock really is. 
+So using this script is better than having no time reference at all, but
+it is not as precise as a real NTP server you might find somewhere else. 
+
+
+Configuration
+-------------
+You first have to download and install chrony. Next you have to start 
+chronyd. Since chronyd should be started always when booting the machine
+you should enter a start/stop scrip in your runlevel directory. In SuSE
+linux this is /etc/init.d you can simply copy the script chrony I
+supplied into /etc/init.d and then cann insserv chrony (creates the
+links in /etc/init.d/rc?.d). In the script you only have to use the
+correct path to chronyd. The default is /usr/sbin/chronyd.
+
+Next you have to do a simple setup of chronyd to specify a password that
+prevents other users from manipulating your time. To do so you need to
+run chronyc and use the password command. The password you have chosen
+here has to be entered in the ws2500setchronytime script:
+
+   # Chrony may use a password it is set to robi below.
+   # The password has to be set in the chrony setup
+   # using the chronyc command and the password option
+   /usr/bin/chronyc  <<-EOF |logger -t setchronytime -s
+        password mypassword
+        settime $T
+        quit
+        EOF
+
+Here you have to modify the password line and provide the password you
+have choosen. when this is done you can call ws2500setchronytime (of
+course your ws2500 weather station has to be connected to the linux
+system) and you should see a message that the time has been set
+successfully.
+
+
+Rnning the script
+-----------------
+
+Probably the best way to run the script is by calling it via cron
+regularly. To do so you could enter a line in /etc/crontab like this:
+
+55 * * * *    root  /usr/local/bin/ws2500setchronytime >/dev/null 2>&1
+
+It is important to choose the correct time to run the script. Since this
+script in turn starts ws2500 you have to choose a time that does not
+conflict with calls of ws2500 to extract your weather data.
+
+Another problem is that the ws2500 station does a DCF resync only at
+03:00 in the night. If you run ws2500 at this time i(03:00-03:05) 
+the DCF sync will fail since the stations aborts the sync process when 
+it has to transfer data over the serial line. 
+This would then lead to the fact, that ws2500 (-s)
+reports the DCF clock NOT to be in sync and this again would prevent
+ws2500setchronytime from using the time. ws2500setchronytime
+only sets the ws2500 time to your system clock if ws2500 says that the DCF
+clock of the station isther OK. 
+
+The cron job from above runs the script each hour at xx:55. Well you
+might call the script as well only once a day, since the ws2500 station
+does only a resync with DCF when its switched on or once a day at 03:00
+in the night. So how often you call the script depends more on your
+believe if you trust your system clock more that the internal ws2500
+clock.....
+

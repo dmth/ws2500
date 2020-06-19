@@ -1,0 +1,1145 @@
+#!/usr/bin/perl
+
+#
+# ws2500 data insert utility
+# R. Krienke, krienke@uni-koblenz.de
+# $Id: ws2500tomysql,v 0.20 2012/03/05 07:43:33 krienke Exp $
+#
+$version='$Revision: 0.20 $';
+# Changes:
+# 2011-12-20 krienke@uni-koblenz.de
+#		added support to read input from wview2ws2500 script to
+#		for importing data recorded by wview's sqlite3 database for eg
+#		data delivered by a Davis Vantage Pro 2 station
+# 2006-05-20 krienke@uni-koblenz.de
+#               modifications to accept new database scheme using a
+#               stationid. Changed rain sensor behaviour so that a
+#               database is only created if the rain sum is > 0
+# 2003-04-03 tdressler@tdressler.de
+#		modified light table->factor smallint,
+#						add pfactor smallint
+#		modified drop/create database function
+# 2003-06-01 krienke@uni-koblenz.de
+#	        modified rain sensor handling to new scheme with counter
+#     		and difference values stored in database
+#
+# Inserts data writenn by ws2500 -t into a mysql database. It also can create this mysql
+# database for you. You only have to adapt the parameters below.
+# Call like this: cat ws2500.data|ws2500tomysql
+#
+# These parameters are needed to create the needed table in the database as well
+# as to insert data into the database:
+# dbServer: The hostname of the server running the mysql server or localhost
+# dbUser: The name of the mysql user owning the database
+# dbPassword: The cosen password of the database
+#
+# Only needed if this script should also create the weather database itself
+# dbadmin: The mysql database administrator user
+# dbadminPw: The password of the database administrator
+#
+# We want to parse commandlineoptions
+use Getopt::Std;
+require DBI;
+
+# **** You may set the following default variables in a local
+# **** $HOME/.ws2500tomysql.conf file as regular perl statements
+# **** just like they are set here (eg $dbServer="sqlserver").
+# **** Doing so will help you t migrate to a newer version ofthis tools
+# **** since you then do not have to overwrite the defaults set below.
+# **** Please take care of the permissions of the .ws2500tomysql.conf
+# **** file since it contains the database password that should not be
+# **** readable to anyone but you.
+$driver="mysql";
+$sysDbName="mysqlhost";
+$dbadmin="root";
+$dbadminPw="";
+$dbServer="mysqlhost.uni-koblenz.de";
+$database="wettertest";
+$dbUser="dbuser";
+$dbPassword="password";
+$defaultPort="3306";
+$debug=0;	# Global debug flag; activated by -D
+$|=10;		# Flush output on stdout after <n> chars
+
+# Sensor ID Offsets. The ids are relatively independent from the weatherstation
+# except for the fact, that the TH-Sensors start from 0 like in the station
+# This ID is used to identify each sensor uniquely in the database
+$idTHS=0; # Has to be zero because sensid 1...8 will be added
+$idPS=1;
+$idWS=1;
+$idRS=1;
+$idLS=1;
+
+# Hash of configured sensorids. This is an additional check that no
+# sensor data is inserted into the db that is probybly wrong. Using this
+# feature only data of sensors will be inserted, that have their sensor
+# id in this list. 1 is the id of the first t/h sensor, 17 is the id of
+# the t/h sensor which is part of the inside sensor. The other part
+# of the inside sensor (pressure) has id $idPS.
+# If you want to use this check-feature set $checkValidSensors to 1 and
+# define all your sensords in %validSensIds as "defined". if
+# $checkValidSensors is 0 then this feature is disabled.
+#
+$checkValidSensors=0;
+%validSensIds=( "1"     => "defined",
+		"17"    => "defined",
+		"$idPS" => "defined",
+		"$idWS" => "defined",
+		"$idRS" => "defined",
+	      );
+
+
+# Mapping from ws2500 sonsor name fields to mysql database
+# table names (what is inserted into which table)
+%mapSensToTbl=( "THS" => "th_sensors",
+		"RS"  => "rain",
+		"WS"  => "wind",
+		"PS"  => "pressure",
+		"IS"  => "pressure",  # Old name "Inside Sensor"
+		"LS"  => "light",
+);
+
+#
+# Mapping of single sensor field names to database column names
+# for each sensor
+# This data structure is a hash of hashes like this:
+# The value of $mapFieldToCol{"THS"} is again a (anonymous) hash which contains
+# The filed names of this sensor as keys. The value of this anonymous hash is the
+# mysql column name used in the mysql table for this field
+# Bedides this the hashes are used to access other sensotype specific data
+#
+%{$mapFieldToCol{"THS"}}=(
+		"Temperatur" 	=> "T",
+		"Humidity"	=> "H",
+		"New"		=> "ok",
+		"sensid"	=> $idTHS
+);
+%{$mapFieldToCol{"RS"}}=(
+		"Counter" =>  	"counter",
+		"New" 	  => 	"ok",
+		"Rain"   =>	"diff",
+	        "ET"  =>	"evapotransp",
+		"sensid" =>     $idRS
+);
+%{$mapFieldToCol{"PS"}}=(
+		"Pressure-relativ" 	=> "P",
+		"Pressure-absolute" 	=> "P",
+		"New"			=> "ok",
+		"sensid" 		=> $idPS
+);
+# Old name of PS: IS from "Inside Sensor". Helps keeping kompatibility
+%{$mapFieldToCol{"IS"}}=(
+		"Pressure-relativ" 	=> "P",
+		"Pressure-absolute" 	=> "P",
+		"New"			=> "ok",
+		"sensid" 		=> $idPS
+);
+%{$mapFieldToCol{"WS"}}=(
+		"Speed" =>  	"speed",
+		"Direction" => 	"angle",
+		"Variance"  =>	"`range`",
+		"GustSpeed" =>  "gustspeed",
+		"GustDirection"=> "gustangle",
+		"New"	=>	"ok",
+		"sensid" =>	$idWS
+);
+%{$mapFieldToCol{"LS"}}=(
+		"Light" =>  	"lux",
+		"Factor" => 	"factor",
+		"Flag"  =>	"sunshine",
+		"DeltaDuration" =>	"sundur",
+	        "Radiation"	=>	"radiation",
+	        "UVindex"	=>	"uvindex",
+		"New"	=>	"ok",
+		"sensid" =>     $idLS
+);
+
+
+
+#
+# SQL script to create database tables
+#
+$sqlCreateTableScript=<<EOF
+CREATE TABLE th_sensors (
+	id       	INT(10) UNSIGNED NOT NULL auto_increment,
+	stationid       TINYINT(3) UNSIGNED NOT NULL DEFAULT 1,
+	sensid		TINYINT(3) UNSIGNED,
+	datetime	DATETIME NOT NULL,
+	T		FLOAT(5,1),
+	H		TINYINT(2) UNSIGNED,
+	ok		CHAR(1),
+	KEY	        (id),
+	INDEX		dataindex(datetime,sensid,stationid)
+);
+
+
+CREATE TABLE pressure (
+	id       	int(10) UNSIGNED NOT NULL auto_increment,
+	stationid       TINYINT(3) UNSIGNED NOT NULL DEFAULT 1,
+	sensid		TINYINT(3) UNSIGNED,
+	datetime	DATETIME NOT NULL,
+	P	        SMALLINT(4),
+	ok		CHAR(1),
+	KEY	        (id),
+	INDEX		dataindex(datetime,sensid,stationid)
+);
+
+
+CREATE TABLE wind (
+	id       	int(10) UNSIGNED NOT NULL auto_increment,
+	stationid       TINYINT(3) UNSIGNED NOT NULL DEFAULT 1,
+	sensid		TINYINT(3) UNSIGNED,
+	datetime 	DATETIME NOT NULL,
+	speed		FLOAT(5,1),
+	angle  		SMALLINT(3) UNSIGNED,
+	gustspeed	FLOAT(5,1) DEFAULT 0,
+	gustangle	SMALLINT(3) UNSIGNED DEFAULT 0,
+        `range`           FLOAT(4,1),
+	ok		CHAR(1),
+	KEY	        (id),
+	INDEX		dataindex(datetime,sensid,stationid)
+);
+
+
+CREATE TABLE rain (
+	id       	int(10) UNSIGNED NOT NULL auto_increment,
+	stationid       TINYINT(3) UNSIGNED NOT NULL DEFAULT 1,
+	sensid		TINYINT(3) UNSIGNED,
+	datetime	DATETIME NOT NULL,
+	counter		SMALLINT(4) UNSIGNED,
+	evapotransp     SMALLINT(4) UNSIGNED,
+	diff 		INT UNSIGNED,
+	ok		CHAR(1),
+	KEY	        (id),
+	INDEX		dataindex(datetime,sensid,stationid)
+);
+
+
+CREATE TABLE light (
+	id       	INT(10) unsigned NOT NULL auto_increment,
+	stationid       TINYINT(3) UNSIGNED NOT NULL DEFAULT 1,
+	sensid		TINYINT(3) UNSIGNED,
+	datetime	DATETIME NOT NULL,
+	counter		SMALLINT UNSIGNED,
+	sunshine	TINYINT,
+	sundur		FLOAT(5,1),
+	lux		SMALLINT UNSIGNED,
+	factor		SMALLINT UNSIGNED,
+        radiation	FLOAT,
+	uvindex		FLOAT,
+	ok		CHAR(1),
+	KEY	        (id),
+	INDEX		dataindex(datetime,sensid,stationid)
+);
+
+
+#
+# a table for each station in use, mainly to collect common data
+# about this station like its name
+#
+#
+CREATE TABLE station_descr (
+        # Id of station. First station should have id 1  (not: 0)
+	stationid    TINYINT(3) UNSIGNED NOT NULL,
+	name         VARCHAR(80),
+	descr        VARCHAR(80),
+	manufacturer VARCHAR(80),
+	model        VARCHAR(80),
+	location     VARCHAR(80),
+	rainbycount  SMALLINT UNSIGNED NOT NULL,
+	altitude     SMALLINT DEFAULT -1,
+	KEY	     (stationid)
+);
+
+
+#
+# a table for each sensor in use, mainly to collect common data
+# about this sensor like its name and its type
+#
+#
+CREATE TABLE sensor_descr (
+	stationid TINYINT(3) UNSIGNED NOT NULL DEFAULT 1,
+	sensid	  TINYINT(3) UNSIGNED NOT NULL,
+	type    ENUM('th', 'wind', 'rain', 'light', 'pressure') NOT NULL,
+	name	VARCHAR(80),
+	KEY	(sensid, type)
+);
+
+
+# Table holds id from last data element of each tbale from above
+# This id is updated after a bunch of data has successfully been inserted
+# into the tables. If an error occured, we can roll back and delete all
+# entries that have just been inserted. Later the insertion that failed
+# before can be rerun and there will be no double defined data entries.
+CREATE TABLE lastids (
+	stationid       TINYINT UNSIGNED NOT NULL,
+	id_PS       	INT(10) unsigned,
+	id_RS       	INT(10) unsigned,
+	id_THS       	INT(10) unsigned,
+	id_WS       	INT(10) unsigned,
+	id_LS       	INT(10) unsigned
+);
+
+EOF
+;
+
+# List of months to conver t eg feb to the number of the month
+%months=(
+		"jan" => "01",
+		"feb" => "02",
+		"mar" => "03",
+		"apr" => "04",
+		"may" => "05",
+		"jun" => "06",
+		"jul" => "07",
+		"aug" => "08",
+		"sep" => "09",
+		"oct" => "10",
+		"nov" => "11",
+		"dec" => "12"
+);
+# -----------------------------------------------------------------------
+
+#
+# Handle warn traps from perl functions (see createDatabase)
+#
+sub trapWarn{
+        my($text)=@_;
+        $errMsg=$text;
+}
+
+
+#
+# dropCreateDatabase: Drop and recreate complete database
+# tables are not created here
+#
+sub dropCreateDatabase{
+   my($dsn, $rc, $drh, $dbh);
+
+   $drh= DBI->install_driver("$driver");
+   $dsn = "DBI:$driver:database=$sysDbName;host=$dbServer;port=$defaultPort";
+   if( ! ($dbh = DBI->connect($dsn, $dbadmin, $dbadminPw,{RaiseError =>1})) ){
+        $errMsg="Cannot Connect to \"$dsn\" as $dbadmin\n";
+        return(0);
+   }
+   $rc=eval {$dbh->do("DROP DATABASE `$database`") };
+   $rc=eval {$dbh->do("CREATE DATABASE `$database`") };
+   $errMsg=$@;
+   $rc=eval {$dbh->do("Grant all on `$database`.* to $dbUser\@$dbServer identified by \'$dbPassword\'") };
+   $errMsg=$@;
+   $dbh->do("Flush privileges") ;
+   $dbh->disconnect();
+
+   return($rc);
+}
+
+
+#
+# dropCreateTables: Drop Database tables and recreate
+#
+sub dropCreateTables{
+   my($dbh, $i, @tables, $sth);
+   my(@commands, $sqlCol, %allowedTabs,  $sqlVal);
+
+   # Connect to the database.
+   $dbh = DBI->connect("DBI:$driver:database=$database;host=$dbServer",
+			$dbUser, $dbPassword,
+			{'RaiseError' => 1, 'AutoCommit' => 1, 'PrintError' => 1 });
+
+   %allowedTabs=( "pressure"=>"1", "wind"=>"1", "rain"=>"1",
+                  "th_sensors"=>"1", "light"=>"1",
+		  "sensor_descr"=>"1", "station_descr"=>"1","lastids"=>"1"               );
+
+   # Drop and create available tables
+   if( $dbh ){
+	@tables=$dbh->tables(); # all existing tables
+	warn "dropCreateTables all tables: ", @tables , "\n" if( $debug );
+
+	foreach $i (@tables){
+	    $tmp=$i;
+	    $tmp=~s/`//go;  # tab names are enclosed by ``
+	    $tmp=~s/$database\.//go;
+	    if( defined($allowedTabs{$tmp}) ){
+	       warn "dropCreateTables: drop table $i\n" if( $debug );
+	       $dbh->do("DROP TABLE $i");
+	    }
+	}
+
+	# Create tables
+	@commands=split(/;/, $sqlCreateTableScript);
+
+	# Break up script "file" into several commands and execute them.
+	foreach $i (@commands){
+		#$i=~s/\s\s+/ /;
+		$i=~s/#.*\n/ /g;
+		$i=~s/^\s+//;
+		warn "$i \n" if( $debug );
+		$dbh->do("$i") if( length($i) );
+	}
+
+	# Now insert zero values into the lastid table
+	# One "0" for each  sensor table that exists
+	$sqlCol="(";
+	$sqlVal="(";
+	foreach $i (keys(%mapSensToTbl)){
+	   # Be compatible with
+	   # old name of PS (pressure Sensor): IS (Inside Sensor)
+	   next if( $i=~/IS/io );
+	   $sqlCol.="id_$i" . ",";
+	   $sqlVal.="0,";
+	}
+	$sqlCol.="stationid,";
+	$sqlVal.="1,";
+
+	$sqlCol=~s/,\s*$/)/;
+	$sqlVal=~s/,\s*$/)/;
+	$dbh->do("INSERT INTO lastids $sqlCol VALUES $sqlVal");
+   }
+}
+
+
+#
+#  Connect to database and return databasehandle
+#
+sub connectDb{
+   my($dsn, $dbh);
+
+   # Connect to database
+   #
+   $dsn = "DBI:$driver:database=$database;host=$dbServer;port=$defaultPort";
+   if( ! ($dbh = DBI->connect($dsn, $dbUser, $dbPassword,
+	{'RaiseError' => 1, 'AutoCommit' => 1, 'PrintError' => 0 })) ) {
+       $errMsg="Cannot Connect to \"$dsn\" as $dbUser\n";
+       return(0);
+   }
+   return($dbh);
+}
+
+
+#
+# Close connection to database
+#
+sub closeDb{
+  my($dbh)=@_;
+
+  $dbh->disconnect();
+}
+
+
+#
+# Scan through header to find number of arguments of each output line.
+# We also look for the Sensor data column names
+# The results are stored in %headers, see debugHeaders()
+#
+sub parseHeader{
+   my($line)=shift;
+   my($lineNo)=shift;
+
+   my($stay, $a, $b, $c);
+   my(@pars);
+
+   $stay=1;
+   chomp($line);
+   if( $line !~ /^# Sensorname/ ){ return(-1)};
+   while(length($line) && $line!~/^#$/){
+      if( $line=~/##/ ){
+         # $line, eg: THS(Temp/humidity): Temperatur(°C), Humidity(%), New(1)
+	 $line=~s/\s+//og;
+      	 ($a, $b)=split(/:/, $line);  # Left side with Sensor abbr. and name
+	 $a=~s/##\s*//;
+	 $c=$a;		# EG: THS(Temp/humidity)
+	 $a=~s/\(.+\)//; # -> THS
+	 $c=~s/[a-zA-Z]+\(([^)]+)\)/\1/; # -> Temp/humidity
+
+	 $headers{"$a"}->{"NAME"}=$c; # Note header
+
+	 @pars=split(/,/, $b); # Number of fields in $b
+
+	 $headers{"$a"}->{"NUMARGS"}=$#pars+1; # Note number of arguments
+
+	 for($i=0; $i <= $#pars; $i++){
+	 	$b=$pars[$i];
+		$c=$b;
+		$b=~s/\([^)]+\)//;
+		$b=~s/^\s+//;
+		$headers{"$a"}->{"PARS"}->[$i]=$b;
+
+		$c=~s/\w+\(([^)]+)\)/\1/;
+		$c=~s/^\s+//;
+		$headers{"$a"}->{"UNITS"}->[$i]=$c;
+
+	 }
+      }
+      $line=<STDIN>; chomp($line);
+      $lineNo++;
+   }
+   return($lineNo);
+}
+
+
+#
+# print out parsed header lines
+#
+sub debugHeaders{
+   my($i, $j, $str);
+   foreach $i (keys(%headers)){
+      warn "Header Name: ", $headers{$i}->{"NAME"}, "\n";
+
+      $str="Header Args: ";
+      for($j=0; $j< $headers{$i}->{"NUMARGS"}; $j++){
+   	   $str.= $headers{"$i"}->{"PARS"}->[$j] . "->";
+	   $str.= $headers{"$i"}->{"UNITS"}->[$j] . "; ";
+      }
+      warn "$str\n";
+   }
+}
+
+
+#
+# insert Data from STDIN into mysql database
+# $line is the line number, blockNr is the ws2500 data block number
+# $date1 is the calendar date, $date2 is the number of seconds since the epoch
+# $sensor is the sensor name, like WS or TH-1,...
+# $drops is the number of drop outs of this sensor, $valCnt is the number
+# of data fields for this sensor, and @value is an array containing the real data
+#
+sub insertData{
+   my ($dbh, $line, $dataSet, $blockNr, $date1, $date2, $stationId,
+       $sensor, $drops, $valCnt, @value)=@_;
+   my ($sensNum, @date, $i, $mDate, $mTime);
+   my(  $table, $colName, $sqlStr, $sqlVal, $sqlCol, $sensid);
+   my($rCount, $rTotal, $RTol, $rOneCount, %toSkip);
+   my($idxRtotal, $skipRain, $et);
+   # $lastRainCount is a global variable used inside this function
+
+
+   $sensNum=0;
+   if( $sensor=~/-[0-9]+/ ){
+      $sensNum=$sensor;
+      $sensNum=~s/^[^-]+-//;
+      $sensor=~s/-$sensNum//
+   }
+
+   @date=split(/\s+/, $date1);
+   $mDate=$date[4] . "-" . $months{lc($date[1])} . "-" . $date[2];
+   $mTime=$date[3];
+
+
+   # Handle rain sensor.
+   # Problem with this sensor is, that it may overflow since its simply
+   # a eg 11 bit counter. So here we store the counter as well as the
+   # absolute amount of rain in mm/1000. If the rain counter overflows,
+   # we simply ignore this one entry. ws2500 sends the current counter
+   # as well as the amount of rain if it can dtermine this (if tolcheck
+   # is active). If ws2500 does not have the abolute value it sets it to
+   # -1 to indicate this condition. This script checks the amount sent
+   # by ws2500 and compares it to the value calculated by the current
+   # counter value, the last counter value taken from the database and
+   # the value for each counterstrike read from ws2500 (constant taken
+   # from users ws2500 config).
+   #
+   # If the rain counter is <0 then this means that 
+   # we no check of rain counters and values is wanted and
+   # the rain value should be used as is (for data from Davis VP2)
+
+   if( $sensor=~/RS/ && $lastRainCount == -1 ){ # First dataset
+	$lastRainCount=getLastRainEntry($dbh);
+	warn "LastRainCount: $lastRainCount\n" if( $debug );
+   }
+   if( $sensor=~/RS/i ){
+   	for($i=$headers{$sensor}->{"NUMARGS"}-1; $i >=0; $i--){
+	   # Absolute amount of rain in mm/1000 or -1 if not available
+	   if( $headers{$sensor}->{"PARS"}[$i] eq "Rain" ){
+	   	$rTotal=$value[$i];
+		$idxRtotal=$i;
+	   }
+	   # Absolute amount of Evapotranspiration in mm/1000 
+	   if( $headers{$sensor}->{"PARS"}[$i] eq "ET" ){
+	   	$et=$value[$i];
+	   }
+	   # Rain counter from station
+	   if( $headers{$sensor}->{"PARS"}[$i] eq "Counter" ){
+	   	$rCount=$value[$i];
+	   }
+	   # Tolerance Value set by user from ws2500 .conf or 0 if unset
+	   if( $headers{$sensor}->{"PARS"}[$i] eq "Tol" ){
+	   	$rTol=$value[$i];
+		$toSkip{$i}="1";
+	   }
+	   # Amount of rain delivered by one counter strike in mm/1000
+	   if( $headers{$sensor}->{"PARS"}[$i] eq "OneCount" ){
+	   	$rOneCount=$value[$i];
+		$toSkip{$i}="1";
+	   }
+
+	   #print "$i:",  $headers{$sensor}->{"PARS"}[$i], ": ", $value[$i], "\n";
+	}
+
+        $skipRain=0; # We only make a DB entry if there was rain or Evapotranspiration
+	#
+	# Now check if rain value is valid
+	# The difference value may not be <0 or > tol
+	# If the rain counter is <0 then this means that 
+	# we no check of rain counters and values is wanted and
+        # the rain value should be used as is (for data from Davis VP2)
+	if( $rCount >=0 ){
+	    $i=$rCount-$lastRainCount;
+	    if( $lastRainCount >=0 && ($i < 0 || (($i > $rTol) && ($rTol!=0))) ){
+		warn "In rain tolcheck \$i=$i\n" if ($debug );
+		# If the value is 0 then we assume that ws2500 aleready
+		# reported a tolcheck error. So we do not want to
+		# repeat this here
+		if( $value[$idxRtotal] != 0 ){
+		   warn "$0: Inputline $line: Invalid rain counter difference",
+		        " $i ($rCount-$lastRainCount) or difference > Tol ",
+			" ($rTol). Set \"diff\" value in database to 0.\n";
+		  $value[$idxRtotal]=0;
+		}
+		$skipRain=1;
+	    }else{
+		# if $rTotal is < 0 the value is unavailable from ws2500
+		# so simply forget it and use value from database
+		$rTotal=$i*$rOneCount if( $rTotal < 0 );
+
+		# Check if total rain value read from data file is
+		# identical to counter difference multiplied by
+		# rain counterValue
+		if( $rTotal != $i*$rOneCount ){
+		   warn "$0: Line $line: Rain values ",
+		   "read from ws2500 ($rTotal) and calculated from database (", ($i*$rOneCount), ") differ. ",
+		   "    Using value based on database counter!\n";
+
+		   # Set value based on the counter value from database
+		   $value[$idxRtotal]=$i*$rOneCount;
+		   #
+		}
+	        if( $value[$idxRtotal] == 0 ){
+	            $skipRain=1;  # No rain, so we make no database entry
+	        }
+	    }
+	}else{
+	    $skipRain=0;
+	    $rCount=0;
+	    if( $value[$idxRtotal] == 0 && $et == 0 ){
+	         $skipRain=1;  # No rain, so we make no database entry
+	    }
+	}
+	$lastRainCount=$rCount;
+   }
+
+
+   if( $headers{$sensor}->{"NUMARGS"} != $valCnt ){
+      warn "*** Error inputline \"$line\": Invalid number of sensor data for sensor: $sensor\n",
+           "    (required: ", $headers{$sensor}->{"NUMARGS"}, ", current: $valCnt) parameters. Data Skipped\n";
+      return(0);
+   }
+
+
+   # Map the sensorname like TH or WS to the name of teh corresponding
+   # mysql table. This is performed by the global hash %mapSensToTbl
+   $table=$mapSensToTbl{$sensor};
+
+   # Calculate unique id of sensor
+   $sensid=$mapFieldToCol{$sensor}->{"sensid"};
+   if( $sensNum ){
+   	$sensid+=$sensNum;  # Basenumber +Sensornumber for THS 1-8 sensors
+   }
+   if( $checkValidSensors ){
+   	if( ! defined($validSensIds{"$sensid"}) ){
+		warn "\n$0: Found data from unwanted sensorid \"$sensid\".\n",
+		     "Data have not been inserted. Please check if this sensorid is\n",
+		     "valid and if it is valid enter it into the variable inside this\n",
+		     "script (see head of script).\n\n";
+		return(0);
+	}
+   }
+
+   if( $sensor ne "RS" || ($sensor eq "RS" && $skipRain == 0) ){
+      $sqlStr="INSERT INTO $table ";
+      $sqlCol="(stationid,datetime,sensid";
+      $sqlVal="($stationId,\"$mDate $mTime\",\"$sensid\"";
+
+      # build up sql string with column names and the according values
+      for($i=0; $i< $headers{$sensor}->{"NUMARGS"}; $i++){
+	   next if( defined($toSkip{$i}) );
+           # $headers{$sensor}->{"PARS"}[i]  contains the names of the fields in
+	   # a ws2500 terse file. We have to map these names to the colum names
+	   # of the mysql table where we want to insert the data. This mapping is
+	   # performed by the global hash %mapFieldToCol
+	   # If a mapping results in an empty field we skip this column
+	   $colName=$mapFieldToCol{$sensor}->{$headers{$sensor}->{"PARS"}[$i]};
+	   next if( length($colName) == 0 );
+
+	   $colValue=$value[$i];
+	   $colValue="'$colValue'";
+
+	   $sqlCol.=",$colName";
+	   $sqlVal.=",$colValue";
+   	   if( $debug ){
+	      warn "$sensor: ", $headers{$sensor}->{"PARS"}[$i], " -> ", $colName, "\n";
+	   }
+      }
+      $sqlCol.=")";
+      $sqlVal.=")";
+
+      $sqlStr.="$sqlCol VALUES $sqlVal";
+
+      warn "SQL: $sqlStr\n" if(  $debug);
+
+      eval { $dbh->do("$sqlStr") };
+      if($@){
+   	   warn "*** Error $@ running command \"$sqlStr\".\n";
+	   return(0);
+      }else{
+	   return(1); # Ok
+      }
+   }else{
+      return(1); #Ok
+   }
+}
+
+
+#
+# Get the highest id values of known sensors from all sensor tables in %mapSensToTbl
+# values are inserted into a hash that is given by the reference
+# $ids
+#
+sub getCurLastids{
+   my($dbh, $ids, $refStationIds)=@_; # Reference to hash
+   my($i, $sid, $id, $sql, $sth, $ref);
+
+   # if the list of stationIds is undefined we fetch all existing sids from table lastids
+   if( !defined($refStationIds) ){
+      $sql="SELECT stationid from lastids";
+      $sth = $dbh->prepare($sql);
+      $sth->execute;
+      $ref=$sth->fetchall_arrayref();
+      die "Error getting stationid's from table lastids.\n"
+                                     if( defined($sth->err) );
+
+      warn "getCurLastids: stationid: " if( $debug );
+      $refStationIds={};
+      # Insert stationids found into hash
+      foreach $i (@{$ref}){
+         $refStationIds->{$i->[0]}=1;
+	 warn "$i->[0], " if( $debug );
+      }
+      warn "\n" if( $debug );
+   }
+
+   # Now get lastids for all stations (stationIds) found or given above
+   foreach $sid (keys(%{$refStationIds})){
+      foreach $i (keys(%mapSensToTbl)){
+	 next if( $i=~/IS/io );
+	 $tmp=$mapSensToTbl{$i};
+	 $sql="SELECT MAX(id) as id from $tmp WHERE stationid=$sid";
+	 $id=$dbh->selectrow_array("$sql");
+	 $id=0 if( !length($id) );
+	 warn "getCurLastids SQL: $sql: $id \n" if( $debug );
+	 $ids->{$sid}->{$i}=$id;
+      }
+   }
+   return($refStationIds);
+}
+
+
+#
+# get id values from table lastids for sensors defined in
+# %mapSensToTbl
+#
+sub getLastids{
+   my($dbh, $ids )=@_;
+   my($sth, $i, $j, @col, @id, $sql, $sids, $sid);
+
+    $sql="SELECT stationid from lastids";
+    $sth = $dbh->prepare($sql);
+    $sth->execute;
+    $sids=$sth->fetchall_arrayref();
+
+    warn "Error get stationid's from table lastids.\n"
+                                     if( defined($sth->err) );
+    warn "getLastids, stationids: ", join(" ", @{$sids}), "\n" if( $debug );
+
+    foreach $j (@{$sids}){
+       $sid=$j->[0];
+       $sql="";
+       foreach $i (keys(%mapSensToTbl)){
+   	   next if( $i=~/IS/io );
+	   $sql.="id_$i,";
+	   $col[$#col+1]="$i";
+       }
+       $sql=~s/,\s*$//;
+
+       # Retrieve data from database
+       warn "getLastids SQL: SELECT $sql from lastids WHERE stationid=$sid" if( $debug );
+       eval{ @id=$dbh->selectrow_array("SELECT $sql from lastids WHERE stationid=$sid") };
+       if( $@ ){
+    	   warn "*** Error: Unable to retrieve id values from table lastids\n";
+       }else{
+	   # Insert values found into hash ids
+	   for($i=0; $i <= $#col; $i++){
+	      $ids->{$sid}->{$col[$i]}=$id[$i];
+	   }
+       }
+    }
+}
+
+
+#
+# Update values in table lastids to current values given
+# in the hash %$ids ($ids is a reference to the hash)
+#
+sub updateLastids{
+   my($dbh, $ids, $refStationIds)=@_;  # ids is a reference to hash
+   my( $sqlCol, $sid, $sqlRow);
+
+   if( $dbh->do("DELETE FROM lastids") <=0 ){
+        warn "Error removing rows from lastids table. Do NOT use Rollbackfeature now!!!\n";
+   }
+   # For all stationid's found write ids into lastids table
+   foreach $sid (keys(%{$refStationIds})){
+      $sqlCol="(stationid,";
+      $sqlVal="($sid,";
+
+      foreach $i (keys(%mapSensToTbl)){
+         next if( $i=~/IS/io );
+	 $sqlCol.="id_$i" . ",";
+	 $sqlVal.=$ids->{$sid}->{$i} . ",";
+      }
+      $sqlCol=~s/,\s*$/)/;
+      $sqlVal=~s/,\s*$/)/;
+
+      warn "updateLastids sql: INSERT INTO lastids $sqlCol VALUES $sqlVal \n" if ($debug );
+      eval{ $dbh->do("INSERT INTO lastids $sqlCol VALUES $sqlVal");
+      };
+      if( $@ ){
+	      warn "*** Error updating lastid table. If you see this error\n",
+		   "    you should NOT start the rollback feature!\n";
+      }
+   }
+}
+
+
+#
+# doRollBack: Delete datasets for which their id entry is higher than the
+# corresponding entry in table lastids. Since entries in tbale lastids
+# are updated when data where successfully inserted this actually removes
+# all data inserted in the last run where an error occured.
+#
+sub doRollBack{
+   my(%lastIds, %curIds, $stationId);
+   my($dbh, $i, $sql, $count, $tot, $sid, $status, $refStationIds);
+
+   $dbh=connectDb();
+   die "*** Error: Cannot Open database\n" if( !$dbh );
+
+   getLastids($dbh, \%lastIds );	  # ids notes in table lastids
+   $refStationIds=getCurLastids($dbh, \%curIds, undef); # ids noted in sensor tables
+
+   $tot=0;
+   $status=0;
+   foreach $i (keys(%mapSensToTbl)){
+	next if( $i=~/IS/io );
+
+	foreach $sid (keys(%{$refStationIds})){
+	   if( $lastIds{$sid}->{$i} != 0 && $lastIds{$sid}->{$i} < $curIds{$sid}->{$i} ){
+	      $sql="DELETE FROM " . $mapSensToTbl{$i};
+	      $sql .= " WHERE stationid=$sid AND " . $mapSensToTbl{$i} . ".id > " . $lastIds{$sid}->{$i};
+	      warn "SQL: $sql \n" if( $debug );
+	      eval { $count=$dbh->do($sql ) };
+	      if( $@ ){
+	           warn "*** Error: Error updating \"lastids\" table in statement:\n",
+			"$sql \n";
+	   	   $status=1;
+		   last;
+	      }
+	      if( $count != $curIds{$sid}->{$i}-$lastIds{$sid}->{$i} ){
+	   	   warn "Warning: Incorrect count of rolled back rows for table ",
+			$mapSensToTbl{$i}, "\n";
+	      }
+	      $tot+=$count;
+	   }
+	 }
+   }
+
+   closeDb($dbh);
+   print "Rolled back a total of $tot rows.\n";
+   return( $status );
+}
+
+
+#
+# Get last Entry for rain sensor from database
+#
+sub getLastRainEntry{
+   my($dbh)=shift;
+   my($id, $sql, $value, @row);
+
+
+   # Find last entry in rain table
+   $id=$dbh->selectrow_array("SELECT MAX(id) as id from rain");
+   warn "maxId Rain in getLastRainEntry: $id\n" if( $debug );
+   if( length($id) ){
+   	# Get value of counter from last entry in rain table
+   	$value=$dbh->selectrow_array("SELECT counter FROM rain WHERE id=$id");
+   }else{
+      $value=-1;
+   }
+   warn "lastRainCount in getLastRainEntry: $lastRainCount \n" if( $debug );
+
+   return($value);
+}
+
+
+#
+# Parse input data for sensor values from ws2500 terse data file
+# and call function to insert each dataset into database
+#
+sub parseData{
+   my($startHeader, $startData, $line, $dataSet, $in);
+   my($sensor, $tmp, $blockNr, $date1, $date2, $value, @value, $drops, $stationId, %stationIds);
+   my($dbh, $dataCount, $errorCount, $backup);
+   my($id, %ids, $sqlCol, $sqlVal, $i, $resRef, $sth, $row);
+
+
+   # Try to open database
+   $dbh=connectDb();
+   if( !$dbh ){
+   	die "Cannot open Database. Exit\n";
+   }
+   $sth=$dbh->prepare("describe rain");
+   $sth->execute;
+   $resRef=$sth->fetchall_arrayref();
+
+   # Check if database has already new format
+   $start=0;
+   foreach $row (@$resRef){
+	   foreach $i (@$row) {
+		$start=1 if( $i=~/diff/ );
+	   }
+   }
+   if( $start != 1 ){
+   	die "Database scheme does not match ws2500tomysql version.\n",
+	    "Database does not have a diff column in rain table\n",
+	    "please convert your database using the convert-script\n",
+   	    "given in the distribution of the ws2500 software.\n",
+	    "See also comments in CHANGES file in distrib for version 0.51!\n\n";
+   }
+
+   $start=0;
+   $startData=0;
+   $line=0;
+   $dataSet=0;
+   $dataCount=0;
+   $errorCount=0;
+
+   #  loop through input
+   while(<>){
+     chomp;
+     $in=$_;
+     $backup=$in;
+     $line++;
+     next if( $in=~/^\s*$/o );
+
+     if( $in =~ /^------/o ){ 	# Found the start datablock line
+	$startData=1;
+	next;
+     }elsif( $in =~ /^#/o ){  	# Parse the ## -headers describing data entries
+	$tmp=parseHeader($in, $line);
+	if( $line<1 ){
+		die "Error: Error in header data line $line\n";
+	}
+	$line=$tmp;
+	debugHeaders() if( $debug );
+	$startData=1;
+	$dataSet++;
+	next;
+     }
+     if( $startData && $in=~/^#/ ){
+     	warn "*** Error in file format line $line\n";
+	next;
+     }elsif( $startData ){ 	# Now we should have sensor data lines
+	# Split sensor name from its values or datestring from date
+	# and Blocknumberstr from blocknumber
+	($sensor, $value)=split( /\s*:\s*/, $in, 2 );
+	@value=split(/\s*,\s*/, $value);
+
+	# Found the blocknumber?
+	if( $sensor=~/Blocknumber/io ){ $blockNr=$value[0];}
+	# Found the date entries (calendar date and seconds since epoch)
+	elsif( $sensor=~/Date/io ){ $date1="$value[0]"; $date2="$value[1]"; }
+	elsif( $sensor=~/Station/io ){ $stationId="$value[0]"; $stationIds{$stationId}=1;}
+
+	else{ # This has to be the first sensor line
+	   ($sensor, $drops)=split(/\s+/, $sensor);
+	   $sensor=~s/\s//;
+	   $drops=~s/\s*[()]\s*//g;
+
+	   for($i=0; $i<=$#value; $i++) {
+	   	$value[$i]=~s/\s+//og;
+	   }
+
+           if( ! length( $stationId )){
+	      $stationId=1;
+	      warn "+++ No value for stationid. Set to 1. Install latest version of ws2500!!!\n";
+	   }
+
+	   $tmp=insertData($dbh, $line, $dataSet, $blockNr, $date1, $date2, $stationId,
+	   	      $sensor, $drops, $#value+1, @value);
+	   if( $tmp ){
+	   	printf(".");
+		$dataCount++;
+	   }else{
+	   	$errorCount++;
+		warn "+++ The input line that caused the insert error was line $line :\n",
+		">>> $backup\n";
+		last;
+	   }
+	}
+     }
+   }
+
+   if( !$errorCount ){ # If everything went just normal
+      # Find out the current id -values (index numbers) of all tables
+      # This id number has to be inserted into the lastid table only
+      # when the insertion process completed without errors.
+      getCurLastids($dbh, \%ids, \%stationIds);
+      updateLastids($dbh, \%ids, \%stationIds);
+   }else{
+
+	warn "*** Error: There were errors inserting data into the database. So what now?\n",
+	     "    You could manually insert the sensor data that failed however this would\n",
+	     "    be very error prone. Fortunately you can remove all the data that were inserted\n",
+	     "    in the last run of this script when the error occured by calling the script\n",
+	     "    with option -R. Next you can start the insert process completely new.\n",
+	     "    If you decide to do this, do it now! If you insert further\n",
+	     "    data by another call of this script, you can no longer remove the data \n",
+	     "    of the failed run before! \n\n";
+   }
+   closeDb($dbh);
+   return($dataCount, $errorCount);
+}
+
+
+#
+# Check if we can connect to mysql-Server
+#
+sub testMysqlConnection{
+   my($dbh, $sth, @row);
+
+   $dbh=connectDb();
+   if( !$dbh ){
+   	exit 1;
+   }
+
+   @row=$dbh->selectrow_array("SHOW STATUS");
+   closeDb($dbh);
+
+   if( $#row >=0 ){
+	warn "Connection to database \"$database\" as user \"$dbUser\" is OK\n";
+   	exit 0;
+   }else{
+   	warn "Connection FAILED\n";
+   	exit 1;
+   }
+}
+
+
+#
+# Print out short help
+#
+sub usage{
+	die "$0 -C|-c|-t|-V [-D]\n",
+	"   -t: Test connection to database server. Exit status of 0 means it is OK.\n",
+	"   -c: Delete database and create new empty one.\n",
+	"   -C: Delete only all tables of database and create new empty ones\n",
+	"   -D: Enable debugging.\n",
+	"   -d <database>: Specify non default name of weather database\n",
+	"   -R  Remove all data inserted in the last run of this script (Roll Back). \n",
+	"       Can be done ONLY IF there was an ERROR in the last run and the script\n",
+	"       has since then not been used to insert further data.\n",
+	"   -V: Print version of this utility.\n";
+	"\n";
+}
+
+
+# Initialize global variables
+$lastRainCount=-1;
+
+# Try to open config file and read variables inside it
+$home=$ENV{"HOME"};
+$configFile="";
+if( -r "$home/.ws2500tomysql.conf" ){
+	$configFile="$home/.ws2500tomysql.conf";
+}elsif( -r "/etc/ws2500/ws2500tomysql.conf" ){
+	$configFile="/etc/ws2500/ws2500tomysql.conf";
+}
+if( length($configFile) ){
+   $cmd="";
+   open( FD, "$configFile" )|| warn "Cannot read $configFile. Ignored\n";
+
+   while( <FD> ){
+	$cmd.=$_;
+	if( length($cmd) > 100000 ){
+	   $cmd="";
+	   die "Too many commands in config file (>100000bytes.  Aborting.\n";
+	}
+   }
+   eval $cmd;
+   $cmd="";
+   close(FD);
+}
+
+#
+# Get Options
+#
+if( ! getopts( 'cCd:DthVR') ){
+        &usage;;
+}
+&usage if( defined($opt_h) );
+
+if( defined($opt_D) ){
+	$debug=1;
+}
+if( defined($opt_d) ){
+	$database=$opt_d;
+}
+if( defined($opt_c) ){		# drop and create database new
+	warn "Do you really want to recreate the database. All possibly\n",
+		"existing data will be lost (y/n)? \n";
+	chomp($a=<STDIN>);
+	if( $a eq "y" ){
+		dropCreateDatabase();
+		dropCreateTables();
+		print "Done.\n";
+	}else{
+		print "Nothing done ...\n";
+	}
+	exit;
+
+}elsif( defined($opt_C)){	# only drop tables and create new
+	warn "Do you really ywant to recreate all tables. All possibly\n",
+		"existing data will be lost (y/n)? \n";
+	chomp($a=<STDIN>);
+	if( $a eq "y" ){
+		dropCreateTables();
+		print "Done.\n";
+	}else{
+		print "Nothing done ...\n";
+	}
+	exit;
+
+}elsif( defined($opt_V) ){
+	warn "$0, Version $version\n";
+	exit;
+}elsif( defined($opt_t) ){
+	testMysqlConnection(); # Check if connection to mysql server is OK
+}elsif( defined($opt_R) ){
+	$e=doRollBack();
+	exit $e;
+}
+
+($d, $e)=parseData();
+printf("\nInserted $d datasets with $e errors.\n\n");
+
+exit $e;

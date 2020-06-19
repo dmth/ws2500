@@ -1,0 +1,105 @@
+Copyright
+---------
+
+ws2500toawekas is written by Rainer Krienke and is distributed under the
+GNU General Public License. 
+
+
+Author and warrenty
+-------------------
+
+Rainer Krienke, krienke@uni-koblenz.de
+
+The author does not provide any warranty nor responsibility  for whatever might
+happen by using this program. If you run it things happen since YOU pressed the
+ENTER key. So if your dog starts barking at you or stops eating and looks 
+sick after you started the program, don't blame me ....
+
+
+
+Wat can it do?
+--------------
+
+This little Perl script will provide data suitable for an upload file for 
+the AWEKAS (Automatisches WEtterKArten System; private weather network in austria, 
+germany and switzerland) project. 
+This way you can participate in this
+weather network without any problems. 
+*After* you performed the setup described below simply register at 
+http://wetter.kremstalnet.at/awekas/index.htm
+
+In the AWEKAS project all participating sites provide a simple text file that 
+contains the current weather data in a special format. This file is automatically 
+downloaded by the maintainers of the AWEKAS site in regular intervals. 
+In order for this to work, you have to run
+a webserver (like apache) on your machine and provide the URL to the datafile, 
+so it can be dowbloaded from AWEKAS. When you register at AWEKAS you have to provide 
+the URL to access the data file.
+
+The script will extract all the data needed from the MYSQL database and echo the 
+formatted output to STDOUT.  All you have to do is redirect this output to the 
+upload file you have choosen when registering at the AWEKAS site and configure the
+script so it has access to the database and knows which temperature sensor is
+your outdoor sensor.
+
+Besides a temp/hum sensor you also need the wind- and rain sensors as well as a 
+inside sensor to measure the air pressure.
+
+
+Version
+-------
+
+1.0
+Tested on a SuSE 9.0 Linux system with MYSQL 4.0
+
+
+Installation
+------------
+
+Copy the script somewhere you like. Next you have to configure the script. You
+have to provide the MYSQL weather database user, the database password as well
+as the sensor ID of your outdoor sensor (AWEKAS does not need the inside temperature
+but only the outdoor temperatur. So be sure to select the correct sensor). Besides this
+AWEKAS also needs the pressure, wind speed and angle and the rain. In this case you
+probably do not have to change anything when you are using the defaults. You must have
+these sensors of course.
+
+You can change the appropriate config variable directly in the head of the 
+script or you can put them into a configuration file ".ws2500toawekas.conf"
+which is always searched in the HOME directory of the user calling this script!
+Another place where you can put the configuration file is /etc/ws2500/ . 
+In this case the config file has to be named ws2500toawekas.conf (no
+leading dot).
+
+You can test the script simply by calling it. The output should look like:
+
+1,6
+81
+1027
+0
+4,1
+160
+07:52
+16.02.2004
+1026
+
+If this seems to work, next you can create a crontab entry to create the upload file
+at regular intervals. An interval of 15 minutes usually makes sense here. So call crontab 
+and insert a line that looks like this:
+
+*/15 *  * * *  /home/krienke/bin/ws2500toawekas>/home/krienke/www/wetter/awekas/awekas.txt
+
+Of course you have to change the paths given in the example to your personal setup. 
+The resulting upload file is in this example written to 
+/home/krienke/www/wetter/awekas/awekas.txt
+
+Now register at AWEKAS.
+In the AWEKAS registration you now have to specify the URL under which the file 
+created by your command from above has been created. The file format type
+created by this script is "WSWIN text file". You have to choose exactly this format 
+during your registratrion.
+
+
+Have lot of fun 
+Rainer Krienke
+02/2004

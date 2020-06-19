@@ -1,0 +1,52 @@
+Copyright
+---------
+
+getws2500data is written by Rainer Krienke and is distributed under the
+GNU General Public License. 
+
+
+Author and warrenty
+-------------------
+
+Rainer Krienke, krienke@uni-koblenz.de
+
+The author does not provide any warranty nor responsibility  for whatever might
+happen by using this program. If you run it things happen since YOU pressed the
+ENTER key. So if your dog starts barking at you or stops eating and looks 
+sick after you started the program, don't blame me ....
+
+
+
+Wat can it do?
+--------------
+
+This bash Shell script is thought to be run by cron, eg. once an hour and 
+will receive the new data from your weather station (using ws2500). 
+The data is first 
+written to a local file and next by ws2500tomysql transferred to the mysql 
+database. Of course the database has to exist and ws2500tomysql as well as 
+getws2500data have to be configured correctly so things can work right. 
+At the start of the script you see the relevant variables especially the 
+binary path of the programs and scripts used by getws2500data.
+
+
+Configuration
+-------------
+
+You can put the configuration in a file in the users HOME directory
+named .getws2500datai.conf or you can put the file getws2500data.conf in
+the directory /etc/ws2500/   .
+The file can contain all the variables of the script up to the line :
+
+# ----- END OF CONFIGURATION ----------------------------
+
+It's really a good idea to put the configuration in a seperate file
+and not into the script itself, since in this case you will loose all
+your configurations if you upgrade the script to a newer version. If you
+put the configuration instead eg. in /etc/ws2500/getws2500data.conf you
+will not have this problem.
+
+
+Have lot of fun 
+Rainer Krienke
+03/2003
