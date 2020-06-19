@@ -22,7 +22,6 @@
 
    $Id: ws2500.h,v 0.39 2006/05/26 08:55:47 krienke Exp $
 */
-
 #include <locale.h>
 #include <signal.h>
 #include <termios.h>
@@ -92,6 +91,7 @@
 #define DSETSTAT_DROPOUT       '0'  /* Sensor had drop outs      */
 #define DSETSTAT_HUMIDITY_LOW  'h'  /* Humidity is below minimal range */
 #define LOWEST_HUMIDITY 20          /* Lowest hum value that can be measured */
+#define INVALID_HUMIDITY 0 /* If a humidity is invalid 0 */
 
 
 
@@ -174,6 +174,8 @@ typedef struct {
 	BOOL ignoreTimeErr;  /* Ignore a timedifference between ws2500 DCF and linux system time */	
 	BOOL useSystemTime;  /* Use linux system, time instead of DCF */
 	int stationId;       /* Id of weather station starting with 1 */
+	int suppressWarnings; /*Warnings will not be shown */
+	int terseIsJson; /* Switch between JSON and original Terse Output */
 } CONFIG;
 
 /* DCF time data structure */

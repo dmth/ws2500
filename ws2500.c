@@ -1,4 +1,4 @@
-/*
+﻿/*
 
    ws2500 -- Weather Data Extraction utility (ws2500 model)
 
@@ -36,7 +36,6 @@ static int doDebug=0;
 static char Version[]="$Revision: 0.155 $";
 CONFIG config;  		      /* Program configuration */
 
-
 /* some debug macros                                                         */
 /* to enable debugging set doDebug to 1; Best use cmdline option -D for this */
 #define DEBUG1(x)   if( doDebug ) fprintf(stderr, x);
@@ -51,7 +50,7 @@ CONFIG config;  		      /* Program configuration */
 /* *********************************** */
 void printError(char *err, int doFlush){
 	if( doFlush ) fflush(stdout);
-	fputs(err, stderr);
+	if ( config.suppressWarnings == 0 ) fputs(err, stderr);
 }
 
 
@@ -938,15 +937,16 @@ u_char calcCheckHum( short bcdLow, short bcdHigh, u_char *new, u_char sensId  )
    if( bcdLow > 9 ){
    	*new=DSETSTAT_HUMIDITY_LOW;
 	if(sensId > 0 )
-	   sprintf(errBuffer, "+ Warning: Hum value from TH sensor %d is invalid. Set to minimum: %d \n", 
-	                      sensId, LOWEST_HUMIDITY );
+	   sprintf(errBuffer, "+ Warning: Hum value from TH sensor %d is invalid. Set to INVALID_HUMIDITY: %d \n", 
+	                      sensId, INVALID_HUMIDITY );
 	else
-	   sprintf(errBuffer, "+ Warning: Hum value from inside sensor is invalid. Set to minimum: %d \n",
-	                      LOWEST_HUMIDITY );
+	   sprintf(errBuffer, "+ Warning: Hum value from inside sensor is invalid. Set to INVALID_HUMIDITY: %d \n",
+	                      INVALID_HUMIDITY );
 	
         printError(errBuffer, 0);
 
-	return(LOWEST_HUMIDITY);   
+	//return(LOWEST_HUMIDITY);   
+	return(INVALID_HUMIDITY);   
    }else{
         /* the switch() below is actually not needed its here just for clarity */
 	/* the functionality could also be done by formatNewFlag()             */
@@ -2172,7 +2172,7 @@ void printData(WS2500_DATA *ws2500Data, WS2500_STATUS *ws2500Stat)
 
    if( ! config.printTerse ){ /* short or long output ?*/
        printf("Data Blocknumber: %u\n", ws2500Data->blockNr );
-       printf("Date: %s\n", (char*)ptime);
+       printf("Date (UTC): %s\n", (char*)ptime);
        printf("Station: %d\n", config.stationId); 
 
 
@@ -2221,10 +2221,10 @@ void printData(WS2500_DATA *ws2500Data, WS2500_STATUS *ws2500Stat)
        if( ws2500Stat->windSens >= 16 && ! ws2500Stat->tolStat.ws_omit ){
 	  printf("Wind (%d drop outs):    ", ws2500Stat->windSens-16);
 	  printf("Speed: %3.1f Km/h, ", ws2500Data->windSens.speed);
-	  printf("Dir: %3d�, ", ws2500Data->windSens.direction);
+	  printf("Dir: %3d °, ", ws2500Data->windSens.direction);
 	  printf("GustSpeed: 0.0, "); 	/* Not valid for ws2500 hence value set to 0 */
 	  printf("GustDir: 0, ");	/* Not valid for ws2500 hence value set to 0 */
-	  printf("Var: %5.1f�, ", ws2500Data->windSens.variance);
+	  printf("Var: %5.1f °, ", ws2500Data->windSens.variance);
 	  printf("New: %c\n", formatNewFlag(ws2500Data->windSens.new) );
        }
 
@@ -2250,12 +2250,210 @@ void printData(WS2500_DATA *ws2500Data, WS2500_STATUS *ws2500Stat)
 	  printf("Power: %3ld W/m, ", ws2500Data->pyranSens.energy);
 	  printf("Factor: %3d\n", ws2500Data->pyranSens.factor);
        }
-
+   }else if ( config.terseIsJson ){
+	   /* JSON output */
+	   
+		/*
+		* {
+		*  "Station"		: ID,
+		*  "Blocknumber"	: ID,
+		*  "DateTime"		: DATETIME,
+		*  "Sensors"		: {
+		* 		"Sensor":{
+		* 			"Name"		: "name",
+		* 			"ID"		: ID,
+		* 			"valid/new"	:"v",
+		* 			"failures"	: f,
+		* 			"Features"	: {
+		* 				"Measurement": {
+		* 					"FeatureOfInterest":	"FOI",
+		* 					"UnitOfMeasurement":	"UOM",
+		* 					"Value":				VALUE,
+		* 				}
+		* 			}
+		* 		}
+		* 	}
+		* }
+		*/
+	   
+		printf("{");
+			printf("\"station\": %d,", config.stationId);
+			printf("\"blocknumber\": %u,", ws2500Data->blockNr );
+			printf("\"datetime\": \"%s\",", (char*)ptime);
+			printf("\"sensors\": [");
+			
+			/* TH Sensors, External */
+				for(i=0; i<MAXTHSENS; i++){
+				if( ws2500Stat->tempSens[i] >= 16 && !(ws2500Stat->tolStat.t_omit[i] || ws2500Stat->tolStat.h_omit[i]) ){
+				if (i >= 1) printf(",");
+				printf("{ \"sensor\": {");
+					printf("\"name\": \"THS\",");
+					printf("\"id\": %d,", i+1);
+					printf("\"valid/new\": \"%c\",", formatNewFlag(ws2500Data->thSens[i].new));
+					printf("\"failures\": %d,", ws2500Stat->tempSens[i]-16);
+					printf("\"features\": [");
+						printf("{ \"measurement\": {");
+							printf("\"featureofinterest\": \"Air Temperature\",");
+							printf("\"unitofmeasurement\": \"°C\",");
+							printf("\"value\": %3.1f", ws2500Data->thSens[i].temp);
+						printf("}},");//   ,   measurement
+						printf("{ \"measurement\": {");
+							printf("\"featureofinterest\": \"Relative Humidity\",");
+							printf("\"unitofmeasurement\": \"%%\",");
+							printf("\"value\": %d", ws2500Data->thSens[i].hum);
+						printf("}}");//measurement
+					printf("]"); //features
+				printf("}}");  //  ,   sensor
+				} //endif
+				} //endfor
+			/* TH Sensor Internal */
+				if( ws2500Stat->insideSens >= 16 && !(ws2500Stat->tolStat.inside_t_omit || ws2500Stat->tolStat.inside_h_omit) ){
+				printf(",");
+				printf("{ \"sensor\": {");
+					printf("\"name\": \"THS\",");
+					printf("\"id\": %d,", 17);
+					printf("\"failures\": %d,", ws2500Stat->insideSens-16);
+					printf("\"valid/new\": \"%c\",", formatNewFlag(ws2500Data->insideSens.newTh));
+					printf("\"features\": [");
+						printf("{ \"measurement\": {");
+							printf("\"featureofinterest\": \"Air Temperature\",");
+							printf("\"unitofmeasurement\": \"°C\",");
+							printf("\"value\": %3.1f", ws2500Data->insideSens.th.temp);
+						printf("}},");//   ,   measurement
+						printf("{ \"measurement\": {");
+							printf("\"featureofinterest\": \"Relative Humidity\",");
+							printf("\"unitofmeasurement\": \"%%\",");
+							printf("\"value\": %d", ws2500Data->insideSens.th.hum);
+						printf("}}");//measurement
+					printf("]"); //features
+				printf("}}"); //sensor
+				} //endif
+			/* Air Pressure */
+				if( ws2500Stat->insideSens >= 16 && !(ws2500Stat->tolStat.inside_t_omit || ws2500Stat->tolStat.inside_h_omit) ){
+					printf(",");
+					printf("{ \"sensor\": {");
+					printf("\"name\": \"PS\",");
+					printf("\"id\": %d,", 1);
+					printf("\"failures\": %d,", ws2500Stat->insideSens-16);
+					printf("\"valid/new\": \"%c\",", formatNewFlag(ws2500Data->insideSens.newP));
+					printf("\"features\": [");
+						printf("{ \"measurement\": {");
+						if( config.altitude ){
+							printf("\"featureofinterest\": \"Relative Air Pressure\",");
+						} else {
+							printf("\"featureofinterest\": \"Absolute Air Pressure\",");
+						}
+							printf("\"unitofmeasurement\": \"millibar\",");
+							printf("\"value\": %d", ws2500Data->insideSens.pressure);	
+						printf("}}");//measurement
+					printf("]"); //features
+				printf("}}"); //sensor
+				} //endif
+			/* Rain sensor output */
+				if( ws2500Stat->rainSens >= 16 && ! ws2500Stat->tolStat.r_omit){
+				printf(",");
+				printf("{ \"sensor\": {");
+					printf("\"name\": \"RS\",");
+					printf("\"id\": %d,", 1);
+					printf("\"failures\": %d,", ws2500Stat->rainSens-16);
+					printf("\"valid/new\": \"%c\",", formatNewFlag(ws2500Data->rainSens.new));
+					printf("\"features\": [");
+						printf("{ \"measurement\": {");
+							printf("\"featureofinterest\": \"Precipation\",");
+							printf("\"unitofmeasurement\": \"TODO\",");
+							printf("\"value\": %d", 0);	
+						printf("}}");//measurement
+					printf("]"); //features
+				printf("}}"); //sensor
+				} //endif
+			/* Wind sensor output */
+				if( ws2500Stat->windSens >= 16 && ! ws2500Stat->tolStat.ws_omit ){
+				printf(",");
+				printf("{ \"sensor\": {");
+					printf("\"name\": \"WS\",");
+					printf("\"id\": %d,", 1);
+					printf("\"failures\": %d,", ws2500Stat->windSens-16);
+					printf("\"valid/new\": \"%c\",", formatNewFlag(ws2500Data->windSens.new));
+					printf("\"features\": [");
+						printf("{ \"measurement\": {");
+							printf("\"featureofinterest\": \"Wind Speed\",");
+							printf("\"unitofmeasurement\": \"Km/h\",");
+							printf("\"value\": %3.1f", ws2500Data->windSens.speed);	
+						printf("}},");//measurement
+						printf("{ \"measurement\": {");
+							printf("\"featureofinterest\": \"Wind Direction\",");
+							printf("\"unitofmeasurement\": \"°\",");
+							printf("\"value\": %d", ws2500Data->windSens.direction);	
+						printf("}},");//measurement
+						printf("{ \"measurement\": {");
+							printf("\"featureofinterest\": \"Wind Variance\",");
+							printf("\"unitofmeasurement\": \"° ??\",");
+							printf("\"value\": %3.1f", ws2500Data->windSens.variance);	
+						printf("}}");//measurement
+					printf("]"); //features
+				printf("}}"); //sensor
+				} //endif
+			
+			/* Light sensor data */
+				if( ws2500Stat->lightSens >= 16 && ! ws2500Stat->tolStat.lux_omit){
+				printf(",");
+				printf("{ \"sensor\": {");
+					printf("\"name\": \"LS\",");
+					printf("\"id\": %d,", 1);
+					printf("\"failures\": %d,", ws2500Stat->lightSens-16);
+					printf("\"valid/new\": \"%c\",", formatNewFlag(ws2500Data->lightSens.new));
+					printf("\"features\": [");
+						printf("{ \"measurement\": {");
+							printf("\"featureofinterest\": \"Brightness\",");
+							printf("\"unitofmeasurement\": \"Lux\",");
+							printf("\"value\": %ld",ws2500Data->lightSens.lux);	
+						printf("}},");//measurement
+						printf("{ \"measurement\": {");
+							printf("\"featureofinterest\": \"Factor\",");
+							printf("\"unitofmeasurement\": \"1\",");
+							printf("\"value\": %d", ws2500Data->lightSens.factor);	
+						printf("}},");//measurement
+						printf("{ \"measurement\": {");
+							printf("\"featureofinterest\": \"Duration\",");
+							printf("\"unitofmeasurement\": \"h\",");
+							printf("\"value\": %d", ws2500Data->lightSens.sunshine);	
+						printf("}}");//measurement
+					printf("]"); //features
+				printf("}}"); //sensor
+				} //endif
+			/* Pyranometer sensor data */
+				if( ws2500Stat->pyranSens >= 16 && ! ws2500Stat->tolStat.energy_omit ){
+				printf(",");
+				printf("{ \"sensor\": {");
+					printf("\"name\": \"PYS\",");
+					printf("\"id\": %d,", 1);
+					printf("\"failures\": %d,", ws2500Stat->pyranSens-16);
+					//printf("\"valid/new\": \"%c\",", 0);
+					printf("\"features\": [");
+						printf("{ \"measurement\": {");
+							printf("\"featureofinterest\": \"Energy\",");
+							printf("\"unitofmeasurement\": \"W/m\",");
+							printf("\"value\": %ld",ws2500Data->pyranSens.energy);	
+						printf("}},");//measurement
+						printf("{ \"measurement\": {");
+							printf("\"featureofinterest\": \"Factor\",");
+							printf("\"unitofmeasurement\": \"1\",");
+							printf("\"value\": %d", ws2500Data->pyranSens.factor);	
+						printf("}}");//measurement
+					printf("]"); //features
+				printf("}}"); //sensor
+				} //endif
+			printf("]"); //sensors
+	   printf("}\n");//root
+	   
+	   
+	   
    }else{ /* *****************  Terse output ********************* */
-       if( firstCall ){
+	   
+       if( firstCall && config.suppressWarnings==0){
           printf("# Sensorname[-number] (drop outs): values of sensor\n");
           printf("## Blocknumber: Block(1)\n");
-          printf("## Date: Cal(date), time(sec)\n");
+          printf("## Date: Cal(date), time(sec), UTC\n");
           printf("## Station: Id(1)\n");
           printf("## THS(Temp/humidity): Temperatur(°C), Humidity(%%), New(1)\n");
 	  if( config.altitude )
@@ -2287,6 +2485,7 @@ void printData(WS2500_DATA *ws2500Data, WS2500_STATUS *ws2500Stat)
 	    }
        }
        /* Inside sensor */
+	   
        if( ws2500Stat->insideSens >= 16 &&
            !(ws2500Stat->tolStat.inside_t_omit || ws2500Stat->tolStat.inside_h_omit) ){
 	  printf("THS-17 (%d): ", ws2500Stat->insideSens-16);
@@ -2354,8 +2553,7 @@ void printData(WS2500_DATA *ws2500Data, WS2500_STATUS *ws2500Stat)
 	  printf("%ld, ", ws2500Data->pyranSens.energy);
 	  printf("%d\n", ws2500Data->pyranSens.factor);
        }
-
-   }
+   } //End of Terse
    firstCall=0;
 }
 
@@ -2627,7 +2825,7 @@ int runCommand(USER_COMMAND c, char opt, int *optArgs )
 
 	       if(buffer[0]==ACK){
 		    stay=1;
-		    printf("----------------------------------------------------------------------\n");
+		    if ( !config.printTerse==1 && !config.terseIsJson==1) printf("----------------------------------------------------------------------\n");
 	       }else{
 		    if( buffer[0] != DLE ){
 		        printError("*** Error in switching to next dataset.\n", 1);
@@ -2669,7 +2867,7 @@ int runCommand(USER_COMMAND c, char opt, int *optArgs )
 	printStatus(&ws2500Stat);
 	returnStatus=0;
      break;
-
+ 
      case DOINTERFACE:	/* Set one of several interface parameters */
      	/* First read stations status which contains current settings */
 	returnStatus=execCommand(config.fd, STATUS, NULL); /* Send command c to station        */
@@ -2864,7 +3062,7 @@ int runCommand(USER_COMMAND c, char opt, int *optArgs )
 /* print out some usage hints */
 /* ************************** */
 void usage(void){
-   fprintf(stderr, "ws2500 {-[d|s|f|g|x|v|u|n] -C <parm> | {-[IRLNPVW <val>]}} [-c cfg,-a <alt>,-D,-t,-p device]\n");
+   fprintf(stderr, "ws2500 {-[d|s|f|g|x|v|u|n] -C <parm> | {-[IRLNPVW <val>]}} [-c cfg,-a <alt>,-D,-t,-w,-p device]\n");
    fprintf(stderr, "\t -a <alt>: Set altitude(m). Used for calculation of relative pressure.\n");
    fprintf(stderr, "\t -d: Get DCF Date and Time\n");
    fprintf(stderr, "\t -u <n>: Get DCF Date and Time, but print only time in format n.\n");
@@ -2878,6 +3076,7 @@ void usage(void){
    fprintf(stderr, "\t     Be aware: This will make all data appear to be new to next -n call.\n");
    fprintf(stderr, "\t -c <cfgFile>: Use <cfgFile> for reading configuration data.\n");
    fprintf(stderr, "\t -t: Output is terse. Thought for automatic postprocessing of data.\n");
+   fprintf(stderr, "\t -w: Warnings and Comments will not be shown in stdout, they will be totally suppressed instead.\n");
    fprintf(stderr, "\t -I <interval>: Set interval for data collection on WS2500.\n");
    fprintf(stderr, "\t -{[NLRWP] <value>}: Set one or more sensor addresses to corresponding \n");
    fprintf(stderr, "\t    <val> for sensor: iNside, Light, Rain, Wind, Pyranometer.\n");
@@ -3224,7 +3423,7 @@ int readConfigFile(char *pathName){
    main()
   -------------------------------------------------------------------------------------- */
 int main(int argc, char **argv){
-   const char *flags = "a:c:dfghinxp:vsu:tC:DI:R:L:N:P:V:W:S";
+   const char *flags = "a:c:dfghinxp:wvsu:tC:DI:R:L:N:P:V:W:S:";
    char cmdOpt;
    int opt, i, stat, ret;
    int optPars[NUMOPTS];
@@ -3244,7 +3443,9 @@ int main(int argc, char **argv){
    config.ignoreTimeErr=FALSE;
    config.stationId=1;   /* Default number of weather station */
    config.useSystemTime=FALSE; /* By default use DCF if available */
-
+   config.suppressWarnings=0; /*Warnings will be displayed by default */
+   config.terseIsJson=1; /*Terse Output is always JSON */
+   
    /* Initialize default values for tolerance values */
    for(i=0;i<MAXTHSENS;i++){
    	config.t.t_tol[i]=0.0;  config.t.h_tol[i]=0;
@@ -3302,6 +3503,10 @@ int main(int argc, char **argv){
       	   usage();
 	 break;
 
+	 case 'w':		/* suppress warnings */
+		config.suppressWarnings=1;
+	 break;
+	 
 	 case 'a':
       	   config.altitude=atoi(optarg);	/* retrieve DCF time */
 	 break;
@@ -3342,7 +3547,7 @@ int main(int argc, char **argv){
 	 case 't':			/* Print status of station in terse form */
            config.printTerse=1;
 	 break;
-
+	 
 	 case 'u':			/* Serial Port */
 	   c=DOPOLLDCF;
 	   config.printTimeOnly=atoi(optarg);
@@ -3403,11 +3608,11 @@ int main(int argc, char **argv){
 	 break;
 
 	 case 'v':			/* print version */
-      	   printf("ws2500 data extraction utility, by Rainer Krienke\n");
+	   printf("ws2500 data extraction utility, by Rainer Krienke\n");
 	   printf("%s\n", Version);
 	   exit( 0 );
 	 break;
-
+	 
 	 default:
       	   usage();
 	 break;
